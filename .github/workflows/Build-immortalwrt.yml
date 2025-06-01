@@ -15,11 +15,24 @@ jobs:
     - name: 🛬 Checkout Repository
       uses: actions/checkout@v4
 
-    - name: 🔍 Read Configuration
+    - name: 🔍 Validate Config Files
+      run: |
+        if [ ! -f "config/devices.json" ] || [ ! -f "config/version.json" ]; then
+          echo "::error::Missing config files!"
+          exit 1
+        fi
+        echo "Config files validation passed ✅"
+
+    - name: 📋 Read Configuration
       id: set-matrix
       run: |
-        # 读取配置文件
-        DEVICES=$(jq -r '.devices[]' config/devices.json)
+        # 检查文件是数组还是对象格式
+        if jq -e '.devices' config/devices.json >/dev/null 2>&1; then
+          DEVICES=$(jq -r '.devices[]' config/devices.json)
+        else
+          DEVICES=$(jq -r '.[]' config/devices.json)
+        fi
+        
         VERSION=$(jq -r '.version' config/version.json)
         
         # 生成构建矩阵
@@ -34,9 +47,8 @@ jobs:
             }]')
         done
         
-        # 设置矩阵输出
         echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
-        echo "::notice::Build matrix generated: $MATRIX"
+        echo "::notice::Build matrix generated for $VERSION: $MATRIX"
 
   build-firmware:
     name: 🔨 Build ${{ matrix.device }}
