@@ -16,7 +16,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: 🔍 Read Configuration
-      id: config
+      id: set-matrix
       run: |
         # 读取配置文件
         DEVICES=$(jq -r '.devices[]' config/devices.json)
@@ -39,15 +39,20 @@ jobs:
         echo "::notice::Build matrix generated: $MATRIX"
 
   build-firmware:
-    name: 🔨 Build Firmware
+    name: 🔨 Build ${{ matrix.device }}
     needs: config
     runs-on: ubuntu-latest
     strategy:
       matrix: ${{ fromJson(needs.config.outputs.matrix) }}
+      fail-fast: false  # 一个设备失败不影响其他设备
 
     steps:
     - name: 🛬 Checkout Repository
       uses: actions/checkout@v4
+
+    - name: 📅 Get Build Date
+      id: date
+      run: echo "date=$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
 
     - name: 🔧 Setup Build Environment
       run: |
@@ -59,20 +64,40 @@ jobs:
     - name: 🗺️ Determine Target Architecture
       id: target
       run: |
-        # 从设备名称推断目标架构 (示例逻辑)
-        if [[ "${{ matrix.device }}" == *"glinet_gl-mt3000"* ]]; then
-          echo "target=mediatek/filogic" >> $GITHUB_OUTPUT
-        elif [[ "${{ matrix.device }}" == *"netgear"* ]]; then
-          echo "target=ipq806x/generic" >> $GITHUB_OUTPUT
+        # 从设备名称推断目标架构
+        DEVICE="${{ matrix.device }}"
+        
+        # 常见设备架构映射
+        if [[ "$DEVICE" == *"xiaomi"* ]]; then
+          TARGET="ramips/mt7621"
+        elif [[ "$DEVICE" == *"netgear"* ]]; then
+          TARGET="ipq806x/generic"
+        elif [[ "$DEVICE" == *"glinet_gl-mt3000"* ]]; then
+          TARGET="mediatek/filogic"
+        elif [[ "$DEVICE" == *"linksys"* ]]; then
+          TARGET="mvebu/cortexa9"
+        elif [[ "$DEVICE" == *"tplink"* ]]; then
+          TARGET="ath79/generic"
         else
-          echo "::error::Unknown device type: ${{ matrix.device }}"
+          echo "::error::Unknown device type: $DEVICE"
           exit 1
         fi
+        
+        echo "target=$TARGET" >> $GITHUB_OUTPUT
+        echo "sanitized_target=${TARGET//\//-}" >> $GITHUB_OUTPUT
+        echo "::notice::Target for $DEVICE: $TARGET"
 
     - name: ⬇️ Download ImageBuilder
       run: |
-        IB_URL="https://downloads.immortalwrt.org/releases/${{ matrix.version }}/targets/${{ steps.target.outputs.target }}/immortalwrt-imagebuilder-${{ matrix.version }}-${{ steps.target.outputs.target | replace('/','-') }}.Linux-x86_64.tar.xz"
+        SANITIZED_TARGET="${{ steps.target.outputs.sanitized_target }}"
+        IB_URL="https://downloads.immortalwrt.org/releases/${{ matrix.version }}/targets/${{ steps.target.outputs.target }}/immortalwrt-imagebuilder-${{ matrix.version }}-$SANITIZED_TARGET.Linux-x86_64.tar.xz"
+        
         echo "📥 Downloading ImageBuilder from: $IB_URL"
+        if ! wget -q --spider "$IB_URL"; then
+          echo "::error::ImageBuilder not found at $IB_URL"
+          exit 1
+        fi
+        
         wget -O imagebuilder.tar.xz "$IB_URL"
         tar -xJf imagebuilder.tar.xz
         mv immortalwrt-imagebuilder-* imagebuilder
@@ -107,19 +132,21 @@ jobs:
       run: |
         cd imagebuilder
         echo "🚀 Building firmware for ${{ matrix.device }} with packages: $PACKAGES"
-        make image PROFILE="${{ matrix.device }}" PACKAGES="$PACKAGES" FILES="../files/"
         
-        # 检查构建结果
-        if [ $? -ne 0 ]; then
+        # 显示可用配置
+        make info
+        
+        if ! make image PROFILE="${{ matrix.device }}" PACKAGES="$PACKAGES" FILES="../files/"; then
           echo "::error::Build failed for ${{ matrix.device }}"
           exit 1
         fi
+        
         echo "✅ Build completed successfully"
 
     - name: 🗜️ Archive Artifacts
       run: |
-        mkdir -p artifacts/${{ matrix.device }}
-        cp bin/targets/*/*/*.bin artifacts/${{ matrix.device }}/
+        mkdir -p ../artifacts/${{ matrix.device }}
+        cp bin/targets/*/*/*.bin ../artifacts/${{ matrix.device }}/
         echo "DEVICE=${{ matrix.device }}" >> $GITHUB_ENV
         echo "ARTIFACT_DIR=artifacts/${{ matrix.device }}" >> $GITHUB_ENV
         echo "::notice::Artifacts stored in artifacts/${{ matrix.device }}"
@@ -131,11 +158,11 @@ jobs:
         tag_name: build-${{ github.run_id }}-${{ matrix.device }}
         name: "Build ${{ github.run_number }} (${{ matrix.device }})"
         body: |
-          ### ImmortalWrt Firmware Build
+          ### 🚀 ImmortalWrt Firmware Build
           **Device**: ${{ matrix.device }}
           **Version**: ${{ matrix.version }}
           **Build ID**: ${{ github.run_id }}
-          **Date**: ${{ steps.get-date.outputs.date }}
+          **Build Date**: ${{ steps.date.outputs.date }}
 
           🔧 Built with GitHub Actions
         draft: false
