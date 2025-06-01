@@ -179,13 +179,13 @@ jobs:
         cd imagebuilder
         echo "🚀 Building firmware for ${{ matrix.device }} with packages: $PACKAGES"
         
-        # 显示可用配置
-        if [ -f "Makefile" ]; then
-          make info || true
-        fi
+        # 获取CPU核心数，限制最大并行数
+        NPROC=$(nproc)
+        MAX_JOBS=$(( NPROC > 4 ? 4 : NPROC ))
         
-        # 增加构建详细日志
-        if ! make image -j$(nproc) PROFILE="${{ matrix.device }}" PACKAGES="$PACKAGES" FILES="../files/" V=s; then
+        echo "🔄 Using $MAX_JOBS parallel jobs for downloading"
+        
+        if ! make -j$MAX_JOBS image PROFILE="${{ matrix.device }}" PACKAGES="$PACKAGES" FILES="../files/" V=s; then
           echo "::error::Build failed for ${{ matrix.device }}"
           
           # 收集错误日志
@@ -201,15 +201,38 @@ jobs:
           exit 1
         fi
         
-        echo "✅ Build completed successfully"
+        echo "✅ Build completed successfully in parallel mode"
+        
+        # 列出构建输出目录内容（用于调试）
+        echo "📂 Build output directory contents:"
+        find bin/targets -type f | while read -r file; do
+          echo "  - $file"
+        done
 
     - name: 🗜️ Archive Artifacts
       run: |
+        # 创建设备目录
         mkdir -p ../artifacts/${{ matrix.device }}
-        cp bin/targets/*/*/*.bin ../artifacts/${{ matrix.device }}/
+        
+        # 查找所有固件文件（更灵活的通配符）
+        echo "🔍 Searching for firmware files..."
+        find bin/targets -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" -o -name "*.trx" \) -print0 | while IFS= read -r -d $'\0' file; do
+          echo "📦 Copying: $file"
+          cp "$file" ../artifacts/${{ matrix.device }}/
+        done
+        
+        # 检查是否复制了文件
+        if [ -z "$(ls -A ../artifacts/${{ matrix.device }})" ]; then
+          echo "::error::No firmware files found!"
+          echo "::error::Build directory contents:"
+          find bin/targets -ls
+          exit 1
+        else
+          echo "✅ Copied $(ls ../artifacts/${{ matrix.device }} | wc -l) files to artifacts/${{ matrix.device }}"
+        fi
+        
         echo "DEVICE=${{ matrix.device }}" >> $GITHUB_ENV
         echo "ARTIFACT_DIR=artifacts/${{ matrix.device }}" >> $GITHUB_ENV
-        echo "::notice::Artifacts stored in artifacts/${{ matrix.device }}"
 
     - name: 🚀 Upload Release
       uses: softprops/action-gh-release@v1
