@@ -104,10 +104,8 @@ jobs:
         SANITIZED_TARGET="${{ steps.target.outputs.sanitized_target }}"
         VERSION="${{ matrix.version }}"
         
-        # 尝试多种可能的URL格式
         BASE_URL="https://downloads.immortalwrt.org/releases/$VERSION/targets/${{ steps.target.outputs.target }}"
         
-        # 优先尝试.zst格式
         URLS=(
           "$BASE_URL/immortalwrt-imagebuilder-$VERSION-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
           "$BASE_URL/immortalwrt-imagebuilder-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
@@ -136,7 +134,6 @@ jobs:
 
     - name: 📦 Extract ImageBuilder
       run: |
-        # 检查文件类型并解压
         if file imagebuilder.tar.zst | grep -q "Zstandard"; then
           echo "🔧 Extracting Zstandard archive"
           tar -I zstd -xf imagebuilder.tar.zst
@@ -148,7 +145,6 @@ jobs:
           exit 1
         fi
         
-        # 重命名目录
         mv immortalwrt-imagebuilder-* imagebuilder
         echo "✅ ImageBuilder extracted successfully"
 
@@ -160,10 +156,11 @@ jobs:
         
         if [ -f "$CUSTOM_PKG_FILE" ]; then
           echo "::notice::Using custom packages for ${{ matrix.device}}"
-          PACKAGES=$(tr '\n' ' ' < "$CUSTOM_PKG_FILE")
+          # 过滤掉空行和注释行
+          PACKAGES=$(grep -vE '^#|^$' "$CUSTOM_PKG_FILE" | tr '\n' ' ')
         elif [ -f "$DEFAULT_PKG_FILE" ]; then
           echo "::notice::Using default packages"
-          PACKAGES=$(tr '\n' ' ' < "$DEFAULT_PKG_FILE")
+          PACKAGES=$(grep -vE '^#|^$' "$DEFAULT_PKG_FILE" | tr '\n' ' ')
         else
           echo "::error::No package list found!"
           exit 1
@@ -176,15 +173,46 @@ jobs:
         echo "📦 Packages to install: $FULL_PKGS"
         echo "PACKAGES=$FULL_PKGS" >> $GITHUB_ENV
 
+    - name: 🔍 Validate Packages
+      run: |
+        cd imagebuilder
+        echo "🔍 Validating packages..."
+        
+        # 获取可用包列表
+        make package/symlinks
+        AVAILABLE_PACKAGES=$(make -s prepare V=s | grep -o 'package/.*' | cut -d' ' -f1 | sort -u)
+        
+        # 检查每个包是否可用
+        for PKG in $PACKAGES; do
+          # 跳过排除的包（以-开头）
+          if [[ $PKG == -* ]]; then
+            continue
+          fi
+          
+          if ! echo "$AVAILABLE_PACKAGES" | grep -q "package/$PKG"; then
+            echo "::error::Package $PKG is not available in this ImageBuilder"
+            exit 1
+          else
+            echo "✅ Package $PKG is available"
+          fi
+        done
+        
+        echo "🎉 All packages are valid"
+
     - name: 🔨 Build Firmware
       run: |
         cd imagebuilder
         echo "🚀 Building firmware for ${{ matrix.device }} with packages: $PACKAGES"
         
-        make info
-        
-        if ! make image PROFILE="${{ matrix.device }}" PACKAGES="$PACKAGES" FILES="../files/"; then
+        # 增加构建详细日志
+        if ! make image PROFILE="${{ matrix.device }}" PACKAGES="$PACKAGES" FILES="../files/" V=s; then
           echo "::error::Build failed for ${{ matrix.device }}"
+          
+          # 收集错误日志
+          ERRORS=$(grep -i 'error\|failed\|undefined' logs/*.log | head -n 20)
+          echo "::error::Build errors:"
+          echo "$ERRORS"
+          
           exit 1
         fi
         
