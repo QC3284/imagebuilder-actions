@@ -8,7 +8,7 @@ on:
     paths:
       - 'config/*'
 
-jobs:
+.jobs:
   config:
     name: ⚙️ Load Configuration
     runs-on: ubuntu-latest
