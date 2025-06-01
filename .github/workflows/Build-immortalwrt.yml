@@ -185,7 +185,7 @@ jobs:
         fi
         
         # 增加构建详细日志
-        if ! make image PROFILE="${{ matrix.device }}" PACKAGES="$PACKAGES" FILES="../files/" V=s; then
+        if ! make image -j$(nproc) PROFILE="${{ matrix.device }}" PACKAGES="$PACKAGES" FILES="../files/" V=s; then
           echo "::error::Build failed for ${{ matrix.device }}"
           
           # 收集错误日志
