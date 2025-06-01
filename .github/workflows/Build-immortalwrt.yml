@@ -1,120 +1,92 @@
-name: 🛠️ ImmortalWrt Firmware Builder
+name: 🔧 ImmortalWrt AutoBuilder
 
 on:
   schedule:
     - cron: '0 0 * * *'  # 每天UTC午夜自动运行
-  workflow_dispatch:     # 手动触发
-    inputs:
-      version:
-        description: '🔖 ImmortalWrt版本 (默认: openwrt-24.10.1)'
-        required: false
-        default: 'openwrt-24.10.1'
-      profile:
-        description: '📱 设备型号 (留空则使用配置文件)'
-        required: false
-      packages_file:
-        description: '📦 自定义软件包文件路径 (留空则使用默认)'
-        required: false
+  workflow_dispatch:     # 允许手动触发
 
 jobs:
   build-firmware:
     runs-on: ubuntu-latest
-    timeout-minutes: 120  # 超时设置
+    strategy:
+      matrix:
+        include: ${{ fromJson(needs.config.outputs.matrix) }}
 
     steps:
-    - name: '🚀 检出仓库'
+    - name: 🛬 Checkout Repository
       uses: actions/checkout@v4
 
-    - name: '📥 解析设备配置'
-      id: device-config
+    - name: ⚙️ Load Configuration
+      id: config
       run: |
-        # 从配置文件读取设备列表
-        DEVICES=$(cat devices.txt | tr '\n' ' ')
-        echo "devices=${DEVICES}" >> $GITHUB_OUTPUT
-        echo "ℹ️ 已加载设备列表: ${DEVICES}"
-
-    - name: '🔧 设置构建参数'
-      id: setup
-      run: |
-        # 确定设备型号
-        if [ -n "${{ inputs.profile }}" ]; then
-          PROFILE="${{ inputs.profile }}"
-          echo "ℹ️ 使用手动指定设备: ${PROFILE}"
-        else
-          PROFILE="${{ steps.device-config.outputs.devices }}"
-          echo "ℹ️ 使用配置文件设备: ${PROFILE}"
-        fi
-
-        # 确定软件包文件
-        if [ -n "${{ inputs.packages_file }}" ]; then
-          PACKAGES_FILE="${{ inputs.packages_file }}"
-          echo "ℹ️ 使用自定义软件包文件: ${PACKAGES_FILE}"
-        else
-          PACKAGES_FILE="default_packages.txt"
-          echo "ℹ️ 使用默认软件包文件"
-        fi
-
-        # 设置输出参数
-        echo "profile=${PROFILE}" >> $GITHUB_OUTPUT
-        echo "packages_file=${PACKAGES_FILE}" >> $GITHUB_OUTPUT
-        echo "version=${{ inputs.version || 'openwrt-24.10.1' }}" >> $GITHUB_OUTPUT
-
-    - name: '🏗️ 安装依赖'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential libncurses5-dev libncursesw5-dev \
-          zlib1g-dev gawk git gettext libssl-dev xsltproc rsync wget unzip python3
-
-    - name: '📦 获取ImageBuilder'
-      run: |
-        VERSION="${{ steps.setup.outputs.version }}"
-        IB_URL="https://downloads.immortalwrt.org/releases/$VERSION/targets/$(echo ${{ steps.setup.outputs.profile }} | cut -d'_' -f1)/$(echo ${{ steps.setup.outputs.profile }} | cut -d'_' -f2)/immortalwrt-imagebuilder-$VERSION-$(echo ${{ steps.setup.outputs.profile }} | tr '_' '-').Linux-x86_64.tar.xz"
+        # 读取配置文件
+        DEVICES=$(jq -r '.devices[]' config/devices.json)
+        VERSION=$(jq -r '.version' config/version.json)
         
-        echo "📥 下载地址: ${IB_URL}"
-        wget ${IB_URL}
-        tar -xvf ./*.tar.xz
-        rm ./*.tar.xz
-        mv immortalwrt-imagebuilder-* imagebuilder
-        echo "✅ ImageBuilder已准备就绪"
-
-    - name: '🧩 配置软件包'
-      run: |
-        cd imagebuilder
-        # 从文件读取软件包列表
-        PACKAGES_LIST=$(cat ../${{ steps.setup.outputs.packages_file }} | tr '\n' ' ')
-        echo "📦 软件包列表: ${PACKAGES_LIST}"
-        echo "PACKAGES_LIST=${PACKAGES_LIST}" >> $GITHUB_ENV
-
-    - name: '🔨 构建固件'
-      run: |
-        cd imagebuilder
-        for DEVICE in ${{ steps.setup.outputs.profile }}; do
-          echo "🚧 正在构建设备: $DEVICE"
-          make image PROFILE="$DEVICE" PACKAGES="$PACKAGES_LIST"
-          echo "✅ $DEVICE 构建完成"
+        # 生成构建矩阵
+        MATRIX=$(jq -n '{include: []}')
+        for DEVICE in $DEVICES; do
+          MATRIX=$(echo $MATRIX | jq \
+            --arg device "$DEVICE" \
+            --arg version "$VERSION" \
+            '.include += [{
+              device: $device,
+              version: $version
+            }]')
         done
-
-    - name: '📤 准备发布文件'
-      run: |
-        mkdir -p artifacts
-        find imagebuilder/bin/targets -type f \( -name "*.bin" -o -name "*.img" \) -exec cp {} artifacts \;
-        echo "📦 固件文件:" && ls -lh artifacts
-
-    - name: '🚀 创建Release'
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: firmware-${{ github.run_id }}
-        name: "🎉 ${{ steps.setup.outputs.version }} 固件 #${{ github.run_number }}"
-        body: |
-          ### 📅 构建信息  
-          **版本**: ${{ steps.setup.outputs.version }}  
-          **设备**: ${{ steps.setup.outputs.profile }}  
-          **包含软件包**: [查看列表](${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}/${{ steps.setup.outputs.packages_file }})  
-          **构建时间**: ${{ steps.prepare.outputs.timestamp }} UTC
-        files: artifacts/*
+        
+        echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: '🧹 清理工作区'
-      if: always()
-      run: rm -rf imagebuilder artifacts
+    - name: 🔧 Setup Build Environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential libncurses5-dev zlib1g-dev \
+          gawk git gettext libssl-dev xsltproc wget unzip python3
+
+    - name: ⬇️ Download ImageBuilder
+      run: |
+        IB_URL="https://downloads.immortalwrt.org/releases/${{ matrix.version }}/targets/${{ matrix.target }}/immortalwrt-imagebuilder-${{ matrix.version }}-${{ matrix.target }}.Linux-x86_64.tar.xz"
+        wget -O imagebuilder.tar.xz "$IB_URL"
+        tar -xJf imagebuilder.tar.xz
+        mv immortalwrt-imagebuilder-* imagebuilder
+
+    - name: 📦 Prepare Packages
+      id: packages
+      run: |
+        # 检查是否存在自定义包列表
+        if [ -f "config/packages_${{ matrix.device }}.txt" ]; then
+          echo "Using custom packages for ${{ matrix.device}}"
+          PACKAGES=$(tr '\n' ' ' < "config/packages_${{ matrix.device }}.txt")
+        else
+          echo "Using default packages"
+          PACKAGES=$(tr '\n' ' ' < "config/default_packages.txt")
+        fi
+        echo "PACKAGES=$PACKAGES" >> $GITHUB_ENV
+
+    - name: 🔨 Build Firmware
+      run: |
+        cd imagebuilder
+        make image PROFILE="${{ matrix.device }}" \
+          PACKAGES="$PACKAGES" \
+          FILES="../files/"  # 可选的定制文件目录
+
+    - name: 🗜️ Archive Artifacts
+      run: |
+        mkdir -p artifacts/${{ matrix.device }}
+        cp imagebuilder/bin/targets/*/*/*.bin artifacts/${{ matrix.device }}/
+        echo "DEVICE=${{ matrix.device }}" >> $GITHUB_ENV
+
+    - name: 🚀 Upload Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: artifacts/${{ env.DEVICE }}/*.bin
+        tag_name: build-${{ github.run_id }}-${{ env.DEVICE }}
+        name: "Build ${{ github.run_id }} (${{ env.DEVICE }})"
+        body: "ImmortalWrt ${{ matrix.version }} for ${{ env.DEVICE }}"
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
