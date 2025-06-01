@@ -3,7 +3,10 @@ name: 🔧 ImmortalWrt AutoBuilder
 on:
   schedule:
     - cron: '0 0 * * *'  # 每天UTC午夜自动运行
-  workflow_dispatch:     # 允许手动
+  workflow_dispatch:     # 允许手动触发
+  push:
+    paths:
+      - 'config/*'       # 配置文件变化时触发
 
 jobs:
   config:
@@ -26,7 +29,7 @@ jobs:
     - name: 📋 Read Configuration
       id: set-matrix
       run: |
-        # 检查文件是数组还是对象格式
+        # 检查设备文件格式
         if jq -e '.devices' config/devices.json >/dev/null 2>&1; then
           DEVICES=$(jq -r '.devices[]' config/devices.json)
         else
@@ -35,20 +38,20 @@ jobs:
         
         VERSION=$(jq -r '.version' config/version.json)
         
-        # 生成构建矩阵
-        MATRIX=$(jq -n '{include: []}')
-        for DEVICE in $DEVICES; do
-          MATRIX=$(echo $MATRIX | jq \
-            --arg device "$DEVICE" \
-            --arg version "$VERSION" \
-            '.include += [{
-              device: $device,
+        # 生成构建矩阵（使用单行JSON格式）
+        MATRIX_JSON=$(jq -n -c \
+          --argjson devices "$(jq -n -c --arg in "$DEVICES" '$in | split("\n") | map(select(. != ""))')" \
+          --arg version "$VERSION" \
+          '{
+            include: $devices | map({
+              device: .,
               version: $version
-            }]')
-        done
+            })
+          }')
         
-        echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
-        echo "::notice::Build matrix generated for $VERSION: $MATRIX"
+        # 正确设置GitHub输出
+        echo "matrix=$MATRIX_JSON" >> $GITHUB_OUTPUT
+        echo "::notice::Build matrix generated for $VERSION: $MATRIX_JSON"
 
   build-firmware:
     name: 🔨 Build ${{ matrix.device }}
@@ -63,7 +66,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: 📅 Get Build Date
-      id: date
+      id: get-date
       run: echo "date=$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
 
     - name: 🔧 Setup Build Environment
@@ -80,12 +83,12 @@ jobs:
         DEVICE="${{ matrix.device }}"
         
         # 常见设备架构映射
-        if [[ "$DEVICE" == *"xiaomi"* ]]; then
+        if [[ "$DEVICE" == *"glinet"* ]]; then
+          TARGET="mediatek/filogic"
+        elif [[ "$DEVICE" == *"xiaomi"* ]]; then
           TARGET="ramips/mt7621"
         elif [[ "$DEVICE" == *"netgear"* ]]; then
           TARGET="ipq806x/generic"
-        elif [[ "$DEVICE" == *"glinet_gl-mt3000"* ]]; then
-          TARGET="mediatek/filogic"
         elif [[ "$DEVICE" == *"linksys"* ]]; then
           TARGET="mvebu/cortexa9"
         elif [[ "$DEVICE" == *"tplink"* ]]; then
@@ -174,7 +177,7 @@ jobs:
           **Device**: ${{ matrix.device }}
           **Version**: ${{ matrix.version }}
           **Build ID**: ${{ github.run_id }}
-          **Build Date**: ${{ steps.date.outputs.date }}
+          **Build Date**: ${{ steps.get-date.outputs.date }}
 
           🔧 Built with GitHub Actions
         draft: false
