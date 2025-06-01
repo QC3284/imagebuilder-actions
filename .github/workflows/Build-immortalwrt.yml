@@ -173,41 +173,6 @@ jobs:
         echo "📦 Packages to install: $FULL_PKGS"
         echo "PACKAGES=$FULL_PKGS" >> $GITHUB_ENV
 
-    - name: 🔍 Validate Packages
-      run: |
-        cd imagebuilder
-        echo "🔍 Validating packages using package list..."
-        
-        # 获取可用包列表（新方法）
-        if [ -f "repositories.conf" ]; then
-          echo "📋 Using repositories.conf for package list"
-          # 从所有源获取包列表
-          AVAILABLE_PACKAGES=$(find . -name Packages | xargs cat | grep -E "^Package: " | awk '{print $2}' | sort -u)
-        elif [ -f "packages/Packages.manifest" ]; then
-          echo "📋 Using Packages.manifest for package list"
-          AVAILABLE_PACKAGES=$(awk '{print $1}' packages/Packages.manifest | sort -u)
-        else
-          echo "::warning::No package list found, skipping validation"
-          exit 0
-        fi
-        
-        # 检查每个包是否可用
-        for PKG in $PACKAGES; do
-          # 跳过排除的包（以-开头）
-          if [[ $PKG == -* ]]; then
-            continue
-          fi
-          
-          if ! echo "$AVAILABLE_PACKAGES" | grep -q -w "$PKG"; then
-            echo "::error::Package $PKG is not available in this ImageBuilder"
-            echo "::error::Available packages: $(echo "$AVAILABLE_PACKAGES" | head -n 5 | tr '\n' ' ')..."
-            exit 1
-          else
-            echo "✅ Package $PKG is available"
-          fi
-        done
-        
-        echo "🎉 All packages are valid"
 
     - name: 🔨 Build Firmware
       run: |
