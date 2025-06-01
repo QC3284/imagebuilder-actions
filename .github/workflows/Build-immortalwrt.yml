@@ -105,7 +105,7 @@ jobs:
     - name: ⬇️ Download ImageBuilder
       run: |
         SANITIZED_TARGET="${{ steps.target.outputs.sanitized_target }}"
-        IB_URL="https://downloads.immortalwrt.org/releases/${{ matrix.version }}/targets/${{ steps.target.outputs.target }}/immortalwrt-imagebuilder-${{ matrix.version }}-$SANITIZED_TARGET.Linux-x86_64.tar.xz"
+        IB_URL="https://downloads.immortalwrt.org/releases/${{ matrix.version }}/targets/${{ steps.target.outputs.target }}/immortalwrt-imagebuilder-${{ matrix.version }}-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
         
         echo "📥 Downloading ImageBuilder from: $IB_URL"
         if ! wget -q --spider "$IB_URL"; then
