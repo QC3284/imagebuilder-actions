@@ -3,20 +3,19 @@ name: 🔧 ImmortalWrt AutoBuilder
 on:
   schedule:
     - cron: '0 0 * * *'  # 每天UTC午夜自动运行
-  workflow_dispatch:     # 允许手动触发
+  workflow_dispatch:     # 允许手动
 
 jobs:
-  build-firmware:
+  config:
+    name: ⚙️ Load Configuration
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include: ${{ fromJson(needs.config.outputs.matrix) }}
-
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
     - name: 🛬 Checkout Repository
       uses: actions/checkout@v4
 
-    - name: ⚙️ Load Configuration
+    - name: 🔍 Read Configuration
       id: config
       run: |
         # 读取配置文件
@@ -35,57 +34,110 @@ jobs:
             }]')
         done
         
+        # 设置矩阵输出
         echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        echo "::notice::Build matrix generated: $MATRIX"
+
+  build-firmware:
+    name: 🔨 Build Firmware
+    needs: config
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.config.outputs.matrix) }}
+
+    steps:
+    - name: 🛬 Checkout Repository
+      uses: actions/checkout@v4
 
     - name: 🔧 Setup Build Environment
       run: |
-        sudo apt-get update
+        sudo apt-get update -y
         sudo apt-get install -y \
           build-essential libncurses5-dev zlib1g-dev \
-          gawk git gettext libssl-dev xsltproc wget unzip python3
+          gawk git gettext libssl-dev xsltproc wget unzip python3 jq
+
+    - name: 🗺️ Determine Target Architecture
+      id: target
+      run: |
+        # 从设备名称推断目标架构 (示例逻辑)
+        if [[ "${{ matrix.device }}" == *"glinet_gl-mt3000"* ]]; then
+          echo "target=mediatek/filogic" >> $GITHUB_OUTPUT
+        elif [[ "${{ matrix.device }}" == *"netgear"* ]]; then
+          echo "target=ipq806x/generic" >> $GITHUB_OUTPUT
+        else
+          echo "::error::Unknown device type: ${{ matrix.device }}"
+          exit 1
+        fi
 
     - name: ⬇️ Download ImageBuilder
       run: |
-        IB_URL="https://downloads.immortalwrt.org/releases/${{ matrix.version }}/targets/${{ matrix.target }}/immortalwrt-imagebuilder-${{ matrix.version }}-${{ matrix.target }}.Linux-x86_64.tar.xz"
+        IB_URL="https://downloads.immortalwrt.org/releases/${{ matrix.version }}/targets/${{ steps.target.outputs.target }}/immortalwrt-imagebuilder-${{ matrix.version }}-${{ steps.target.outputs.target | replace('/','-') }}.Linux-x86_64.tar.xz"
+        echo "📥 Downloading ImageBuilder from: $IB_URL"
         wget -O imagebuilder.tar.xz "$IB_URL"
         tar -xJf imagebuilder.tar.xz
         mv immortalwrt-imagebuilder-* imagebuilder
+        echo "✅ ImageBuilder extracted successfully"
 
     - name: 📦 Prepare Packages
       id: packages
       run: |
         # 检查是否存在自定义包列表
-        if [ -f "config/packages_${{ matrix.device }}.txt" ]; then
-          echo "Using custom packages for ${{ matrix.device}}"
-          PACKAGES=$(tr '\n' ' ' < "config/packages_${{ matrix.device }}.txt")
+        CUSTOM_PKG_FILE="config/packages_${{ matrix.device }}.txt"
+        DEFAULT_PKG_FILE="config/default_packages.txt"
+        
+        if [ -f "$CUSTOM_PKG_FILE" ]; then
+          echo "::notice::Using custom packages for ${{ matrix.device}}"
+          PACKAGES=$(tr '\n' ' ' < "$CUSTOM_PKG_FILE")
+        elif [ -f "$DEFAULT_PKG_FILE" ]; then
+          echo "::notice::Using default packages"
+          PACKAGES=$(tr '\n' ' ' < "$DEFAULT_PKG_FILE")
         else
-          echo "Using default packages"
-          PACKAGES=$(tr '\n' ' ' < "config/default_packages.txt")
+          echo "::error::No package list found!"
+          exit 1
         fi
-        echo "PACKAGES=$PACKAGES" >> $GITHUB_ENV
+        
+        # 添加必要的基础包
+        BASE_PKGS="luci luci-theme-bootstrap -dnsmasq dnsmasq-full"
+        FULL_PKGS="$BASE_PKGS $PACKAGES"
+        
+        echo "📦 Packages to install: $FULL_PKGS"
+        echo "PACKAGES=$FULL_PKGS" >> $GITHUB_ENV
 
     - name: 🔨 Build Firmware
       run: |
         cd imagebuilder
-        make image PROFILE="${{ matrix.device }}" \
-          PACKAGES="$PACKAGES" \
-          FILES="../files/"  # 可选的定制文件目录
+        echo "🚀 Building firmware for ${{ matrix.device }} with packages: $PACKAGES"
+        make image PROFILE="${{ matrix.device }}" PACKAGES="$PACKAGES" FILES="../files/"
+        
+        # 检查构建结果
+        if [ $? -ne 0 ]; then
+          echo "::error::Build failed for ${{ matrix.device }}"
+          exit 1
+        fi
+        echo "✅ Build completed successfully"
 
     - name: 🗜️ Archive Artifacts
       run: |
         mkdir -p artifacts/${{ matrix.device }}
-        cp imagebuilder/bin/targets/*/*/*.bin artifacts/${{ matrix.device }}/
+        cp bin/targets/*/*/*.bin artifacts/${{ matrix.device }}/
         echo "DEVICE=${{ matrix.device }}" >> $GITHUB_ENV
+        echo "ARTIFACT_DIR=artifacts/${{ matrix.device }}" >> $GITHUB_ENV
+        echo "::notice::Artifacts stored in artifacts/${{ matrix.device }}"
 
     - name: 🚀 Upload Release
       uses: softprops/action-gh-release@v1
       with:
-        files: artifacts/${{ env.DEVICE }}/*.bin
-        tag_name: build-${{ github.run_id }}-${{ env.DEVICE }}
-        name: "Build ${{ github.run_id }} (${{ env.DEVICE }})"
-        body: "ImmortalWrt ${{ matrix.version }} for ${{ env.DEVICE }}"
+        files: ${{ env.ARTIFACT_DIR }}/*.bin
+        tag_name: build-${{ github.run_id }}-${{ matrix.device }}
+        name: "Build ${{ github.run_number }} (${{ matrix.device }})"
+        body: |
+          ### ImmortalWrt Firmware Build
+          **Device**: ${{ matrix.device }}
+          **Version**: ${{ matrix.version }}
+          **Build ID**: ${{ github.run_id }}
+          **Date**: ${{ steps.get-date.outputs.date }}
+
+          🔧 Built with GitHub Actions
         draft: false
         prerelease: false
       env:
