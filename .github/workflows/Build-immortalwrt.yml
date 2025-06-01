@@ -176,11 +176,20 @@ jobs:
     - name: 🔍 Validate Packages
       run: |
         cd imagebuilder
-        echo "🔍 Validating packages..."
+        echo "🔍 Validating packages using package list..."
         
-        # 获取可用包列表
-        make package/symlinks
-        AVAILABLE_PACKAGES=$(make -s prepare V=s | grep -o 'package/.*' | cut -d' ' -f1 | sort -u)
+        # 获取可用包列表（新方法）
+        if [ -f "repositories.conf" ]; then
+          echo "📋 Using repositories.conf for package list"
+          # 从所有源获取包列表
+          AVAILABLE_PACKAGES=$(find . -name Packages | xargs cat | grep -E "^Package: " | awk '{print $2}' | sort -u)
+        elif [ -f "packages/Packages.manifest" ]; then
+          echo "📋 Using Packages.manifest for package list"
+          AVAILABLE_PACKAGES=$(awk '{print $1}' packages/Packages.manifest | sort -u)
+        else
+          echo "::warning::No package list found, skipping validation"
+          exit 0
+        fi
         
         # 检查每个包是否可用
         for PKG in $PACKAGES; do
@@ -189,8 +198,9 @@ jobs:
             continue
           fi
           
-          if ! echo "$AVAILABLE_PACKAGES" | grep -q "package/$PKG"; then
+          if ! echo "$AVAILABLE_PACKAGES" | grep -q -w "$PKG"; then
             echo "::error::Package $PKG is not available in this ImageBuilder"
+            echo "::error::Available packages: $(echo "$AVAILABLE_PACKAGES" | head -n 5 | tr '\n' ' ')..."
             exit 1
           else
             echo "✅ Package $PKG is available"
@@ -204,12 +214,22 @@ jobs:
         cd imagebuilder
         echo "🚀 Building firmware for ${{ matrix.device }} with packages: $PACKAGES"
         
+        # 显示可用配置
+        if [ -f "Makefile" ]; then
+          make info || true
+        fi
+        
         # 增加构建详细日志
         if ! make image PROFILE="${{ matrix.device }}" PACKAGES="$PACKAGES" FILES="../files/" V=s; then
           echo "::error::Build failed for ${{ matrix.device }}"
           
           # 收集错误日志
-          ERRORS=$(grep -i 'error\|failed\|undefined' logs/*.log | head -n 20)
+          if [ -d "logs" ]; then
+            ERRORS=$(grep -i 'error\|failed\|undefined' logs/*.log | head -n 20 || true)
+          else
+            ERRORS="No logs directory found"
+          fi
+          
           echo "::error::Build errors:"
           echo "$ERRORS"
           
