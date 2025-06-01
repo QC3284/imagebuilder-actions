@@ -2,11 +2,11 @@ name: 🔧 ImmortalWrt AutoBuilder
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # 每天UTC午夜自动运行
-  workflow_dispatch:     # 允许手动触发
+    - cron: '0 0 * * *'
+  workflow_dispatch:
   push:
     paths:
-      - 'config/*'       # 配置文件变化时触发
+      - 'config/*'
 
 jobs:
   config:
@@ -29,7 +29,6 @@ jobs:
     - name: 📋 Read Configuration
       id: set-matrix
       run: |
-        # 检查设备文件格式
         if jq -e '.devices' config/devices.json >/dev/null 2>&1; then
           DEVICES=$(jq -r '.devices[]' config/devices.json)
         else
@@ -38,7 +37,6 @@ jobs:
         
         VERSION=$(jq -r '.version' config/version.json)
         
-        # 生成构建矩阵（使用单行JSON格式）
         MATRIX_JSON=$(jq -n -c \
           --argjson devices "$(jq -n -c --arg in "$DEVICES" '$in | split("\n") | map(select(. != ""))')" \
           --arg version "$VERSION" \
@@ -49,7 +47,6 @@ jobs:
             })
           }')
         
-        # 正确设置GitHub输出
         echo "matrix=$MATRIX_JSON" >> $GITHUB_OUTPUT
         echo "::notice::Build matrix generated for $VERSION: $MATRIX_JSON"
 
@@ -59,7 +56,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix: ${{ fromJson(needs.config.outputs.matrix) }}
-      fail-fast: false  # 一个设备失败不影响其他设备
+      fail-fast: false
 
     steps:
     - name: 🛬 Checkout Repository
@@ -74,25 +71,25 @@ jobs:
         sudo apt-get update -y
         sudo apt-get install -y \
           build-essential libncurses5-dev zlib1g-dev \
-          gawk git gettext libssl-dev xsltproc wget unzip python3 jq
+          gawk git gettext libssl-dev xsltproc wget unzip python3 jq zstd
 
     - name: 🗺️ Determine Target Architecture
       id: target
       run: |
-        # 从设备名称推断目标架构
         DEVICE="${{ matrix.device }}"
         
-        # 常见设备架构映射
-        if [[ "$DEVICE" == *"glinet"* ]]; then
-          TARGET="mediatek/filogic"
-        elif [[ "$DEVICE" == *"xiaomi"* ]]; then
-          TARGET="ramips/mt7621"
-        elif [[ "$DEVICE" == *"netgear"* ]]; then
-          TARGET="ipq806x/generic"
-        elif [[ "$DEVICE" == *"linksys"* ]]; then
-          TARGET="mvebu/cortexa9"
-        elif [[ "$DEVICE" == *"tplink"* ]]; then
-          TARGET="ath79/generic"
+        declare -A DEVICE_TARGETS=(
+          ["glinet_gl-mt3000"]="mediatek/filogic"
+          ["glinet_gl-mt6000"]="mediatek/filogic"
+          ["xiaomi_redmi-router-ax6000"]="mediatek/filogic"
+          ["xiaomi_mi-router-3g"]="ramips/mt7621"
+          ["netgear_r7800"]="ipq806x/generic"
+          ["linksys_wrt3200acm"]="mvebu/cortexa9"
+          ["tplink_archer-c7-v5"]="ath79/generic"
+        )
+        
+        if [[ -n "${DEVICE_TARGETS[$DEVICE]}" ]]; then
+          TARGET="${DEVICE_TARGETS[$DEVICE]}"
         else
           echo "::error::Unknown device type: $DEVICE"
           exit 1
@@ -105,23 +102,59 @@ jobs:
     - name: ⬇️ Download ImageBuilder
       run: |
         SANITIZED_TARGET="${{ steps.target.outputs.sanitized_target }}"
-        IB_URL="https://downloads.immortalwrt.org/releases/${{ matrix.version }}/targets/${{ steps.target.outputs.target }}/immortalwrt-imagebuilder-${{ matrix.version }}-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
+        VERSION="${{ matrix.version }}"
         
-        echo "📥 Downloading ImageBuilder from: $IB_URL"
-        if ! wget -q --spider "$IB_URL"; then
-          echo "::error::ImageBuilder not found at $IB_URL"
+        # 尝试多种可能的URL格式
+        BASE_URL="https://downloads.immortalwrt.org/releases/$VERSION/targets/${{ steps.target.outputs.target }}"
+        
+        # 优先尝试.zst格式
+        URLS=(
+          "$BASE_URL/immortalwrt-imagebuilder-$VERSION-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
+          "$BASE_URL/immortalwrt-imagebuilder-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
+          "$BASE_URL/immortalwrt-imagebuilder-$VERSION-$SANITIZED_TARGET.Linux-x86_64.tar.xz"
+          "$BASE_URL/immortalwrt-imagebuilder-$SANITIZED_TARGET.Linux-x86_64.tar.xz"
+        )
+        
+        FOUND=0
+        for URL in "${URLS[@]}"; do
+          echo "🔍 Checking: $URL"
+          if wget -q --spider "$URL"; then
+            echo "✅ Found valid ImageBuilder at: $URL"
+            wget -O imagebuilder.tar.zst "$URL"
+            FOUND=1
+            break
+          fi
+        done
+        
+        if [ "$FOUND" -eq 0 ]; then
+          echo "::error::ImageBuilder not found at any URL"
+          for URL in "${URLS[@]}"; do
+            echo "::error::Tried: $URL"
+          done
+          exit 1
+        fi
+
+    - name: 📦 Extract ImageBuilder
+      run: |
+        # 检查文件类型并解压
+        if file imagebuilder.tar.zst | grep -q "Zstandard"; then
+          echo "🔧 Extracting Zstandard archive"
+          tar -I zstd -xf imagebuilder.tar.zst
+        elif file imagebuilder.tar.zst | grep -q "XZ"; then
+          echo "🔧 Extracting XZ archive"
+          tar -xJf imagebuilder.tar.zst
+        else
+          echo "::error::Unknown archive format"
           exit 1
         fi
         
-        wget -O imagebuilder.tar.xz "$IB_URL"
-        tar -xJf imagebuilder.tar.xz
+        # 重命名目录
         mv immortalwrt-imagebuilder-* imagebuilder
         echo "✅ ImageBuilder extracted successfully"
 
     - name: 📦 Prepare Packages
       id: packages
       run: |
-        # 检查是否存在自定义包列表
         CUSTOM_PKG_FILE="config/packages_${{ matrix.device }}.txt"
         DEFAULT_PKG_FILE="config/default_packages.txt"
         
@@ -148,7 +181,6 @@ jobs:
         cd imagebuilder
         echo "🚀 Building firmware for ${{ matrix.device }} with packages: $PACKAGES"
         
-        # 显示可用配置
         make info
         
         if ! make image PROFILE="${{ matrix.device }}" PACKAGES="$PACKAGES" FILES="../files/"; then
