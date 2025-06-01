@@ -203,32 +203,51 @@ jobs:
         
         echo "✅ Build completed successfully in parallel mode"
         
-        # 列出构建输出目录内容（用于调试）
+        # 确保输出目录存在
+        mkdir -p bin/targets
+        
+        # 列出构建输出目录内容（使用绝对路径）
         echo "📂 Build output directory contents:"
-        find bin/targets -type f | while read -r file; do
+        find "$(pwd)/bin/targets" -type f | while read -r file; do
           echo "  - $file"
         done
 
     - name: 🗜️ Archive Artifacts
       run: |
-        # 创建设备目录
-        mkdir -p ../artifacts/${{ matrix.device }}
+        # 确保在正确的工作目录
+        cd "$GITHUB_WORKSPACE"
         
-        # 查找所有固件文件（更灵活的通配符）
-        echo "🔍 Searching for firmware files..."
-        find bin/targets -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" -o -name "*.trx" \) -print0 | while IFS= read -r -d $'\0' file; do
-          echo "📦 Copying: $file"
-          cp "$file" ../artifacts/${{ matrix.device }}/
-        done
+        # 创建设备目录
+        mkdir -p artifacts/${{ matrix.device }}
+        
+        # 使用绝对路径查找固件文件
+        echo "🔍 Searching for firmware files in imagebuilder/bin/targets..."
+        FIRMWARE_FILES=$(find imagebuilder/bin/targets -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" -o -name "*.trx" \) 2>/dev/null)
+        
+        if [ -n "$FIRMWARE_FILES" ]; then
+          echo "✅ Found firmware files:"
+          echo "$FIRMWARE_FILES"
+          
+          # 复制文件
+          echo "$FIRMWARE_FILES" | while read -r file; do
+            echo "📦 Copying: $file"
+            cp "$file" artifacts/${{ matrix.device }}/
+          done
+        else
+          echo "::error::No firmware files found!"
+          echo "::error::Build output directory content:"
+          find imagebuilder/bin -type d -ls || true
+          exit 1
+        fi
         
         # 检查是否复制了文件
-        if [ -z "$(ls -A ../artifacts/${{ matrix.device }})" ]; then
-          echo "::error::No firmware files found!"
-          echo "::error::Build directory contents:"
-          find bin/targets -ls
+        if [ -z "$(ls -A artifacts/${{ matrix.device }})" ]; then
+          echo "::error::No files copied to artifacts directory!"
+          echo "::error::Artifacts directory content:"
+          ls -la artifacts/${{ matrix.device }}
           exit 1
         else
-          echo "✅ Copied $(ls ../artifacts/${{ matrix.device }} | wc -l) files to artifacts/${{ matrix.device }}"
+          echo "✅ Copied $(ls artifacts/${{ matrix.device }} | wc -l) files to artifacts/${{ matrix.device }}"
         fi
         
         echo "DEVICE=${{ matrix.device }}" >> $GITHUB_ENV
