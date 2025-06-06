@@ -8,7 +8,7 @@ on:
     paths:
       - 'config/*'
 
-jobs:  # 修正这里：去掉开头的点号
+jobs:
   config:
     name: ⚙️ Load Configuration
     runs-on: ubuntu-latest
@@ -113,7 +113,8 @@ jobs:  # 修正这里：去掉开头的点号
         SANITIZED_TARGET="${{ steps.target.outputs.sanitized_target }}"
         VERSION="${{ matrix.version }}"
         
-        BASE_URL="https://downloads.immortalwrt.org/releases/$VERSION/targets/${{ steps.target.outputs.target }}"
+        # 使用更快的镜像源
+        BASE_URL="https://immortalwrt.kyarucloud.moe/releases/$VERSION/targets/${{ steps.target.outputs.target }}"
         
         URLS=(
           "$BASE_URL/immortalwrt-imagebuilder-$VERSION-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
@@ -192,9 +193,14 @@ jobs:  # 修正这里：去掉开头的点号
         echo "📦 Packages to install: $FULL_PKGS"
         echo "PACKAGES=$FULL_PKGS" >> $GITHUB_ENV
 
-    - name: 🔨 Build Firmware
+    - name: 🔨 Build Firmware (with fast mirror)
       run: |
         cd imagebuilder
+        
+        # 设置更快的软件包下载源
+        echo "📡 Using fast mirror for package downloads"
+        sed -i "s|https://downloads.immortalwrt.org|https://immortalwrt.kyarucloud.moe|g" repositories.conf
+        
         echo "🚀 Building firmware for ${{ matrix.device }} with packages: $PACKAGES"
         
         # 获取CPU核心数，限制最大并行数
@@ -202,6 +208,9 @@ jobs:  # 修正这里：去掉开头的点号
         MAX_JOBS=$(( NPROC > 4 ? 4 : NPROC ))
         
         echo "🔄 Using $MAX_JOBS parallel jobs for downloading"
+        
+        # 添加环境变量确保所有下载都使用快速镜像
+        export DOWNLOAD_MIRROR="https://immortalwrt.kyarucloud.moe"
         
         if ! make -j$MAX_JOBS image PROFILE="${{ matrix.device }}" PACKAGES="$PACKAGES" FILES="../files/" V=s; then
           echo "::error::Build failed for ${{ matrix.device }}"
@@ -318,7 +327,9 @@ jobs:  # 修正这里：去掉开头的点号
           - SHA1
           - SHA3-256
           
-          🔧 Built with GitHub Actions at ${{ steps.get-date.outputs.date }} (CST)
+          ### ⚡ Build Features:
+          - Built with GitHub Actions at ${{ steps.get-date.outputs.date }} (CST)
+          - Used fast mirror: https://immortalwrt.kyarucloud.moe
         draft: false
         prerelease: false
       env:
