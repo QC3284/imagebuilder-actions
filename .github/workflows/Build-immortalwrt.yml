@@ -113,8 +113,8 @@ jobs:
         SANITIZED_TARGET="${{ steps.target.outputs.sanitized_target }}"
         VERSION="${{ matrix.version }}"
         
-        # 使用更快的镜像源
-        BASE_URL="https://immortalwrt.kyarucloud.moe/releases/$VERSION/targets/${{ steps.target.outputs.target }}"
+        # 使用官方下载源
+        BASE_URL="https://downloads.immortalwrt.org/releases/$VERSION/targets/${{ steps.target.outputs.target }}"
         
         URLS=(
           "$BASE_URL/immortalwrt-imagebuilder-$VERSION-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
@@ -128,8 +128,8 @@ jobs:
           echo "🔍 Checking: $URL"
           if wget -q --spider "$URL"; then
             echo "✅ Found valid ImageBuilder at: $URL"
-            # 使用axel加速下载（10线程）
-            axel -n 10 -o imagebuilder.tar.zst "$URL"
+            # 使用axel加速下载（32线程）
+            axel -n 32 -o imagebuilder.tar.zst "$URL"
             if [ $? -eq 0 ]; then
               echo "🚀 Downloaded with axel successfully"
               FOUND=1
@@ -193,14 +193,9 @@ jobs:
         echo "📦 Packages to install: $FULL_PKGS"
         echo "PACKAGES=$FULL_PKGS" >> $GITHUB_ENV
 
-    - name: 🔨 Build Firmware (with fast mirror)
+    - name: 🔨 Build Firmware
       run: |
         cd imagebuilder
-        
-        # 设置更快的软件包下载源
-        echo "📡 Using fast mirror for package downloads"
-        sed -i "s|https://downloads.immortalwrt.org|https://immortalwrt.kyarucloud.moe|g" repositories.conf
-        
         echo "🚀 Building firmware for ${{ matrix.device }} with packages: $PACKAGES"
         
         # 获取CPU核心数，限制最大并行数
@@ -208,9 +203,6 @@ jobs:
         MAX_JOBS=$(( NPROC > 4 ? 4 : NPROC ))
         
         echo "🔄 Using $MAX_JOBS parallel jobs for downloading"
-        
-        # 添加环境变量确保所有下载都使用快速镜像
-        export DOWNLOAD_MIRROR="https://immortalwrt.kyarucloud.moe"
         
         if ! make -j$MAX_JOBS image PROFILE="${{ matrix.device }}" PACKAGES="$PACKAGES" FILES="../files/" V=s; then
           echo "::error::Build failed for ${{ matrix.device }}"
@@ -306,7 +298,7 @@ jobs:
         echo "ARTIFACT_DIR=artifacts/${{ matrix.device }}" >> $GITHUB_ENV
 
     - name: 🚀 Upload Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         files: ${{ env.ARTIFACT_DIR }}/*
         tag_name: build-${{ github.run_id }}-${{ matrix.device }}
@@ -327,9 +319,7 @@ jobs:
           - SHA1
           - SHA3-256
           
-          ### ⚡ Build Features:
-          - Built with GitHub Actions at ${{ steps.get-date.outputs.date }} (CST)
-          - Used fast mirror: https://immortalwrt.kyarucloud.moe
+          🔧 Built with GitHub Actions at ${{ steps.get-date.outputs.date }} (CST)
         draft: false
         prerelease: false
       env:
