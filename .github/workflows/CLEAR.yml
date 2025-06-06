@@ -1,22 +1,38 @@
-name: Clear Releases with GH CLI
+name: Clear All Releases
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # 手动触发
 
 jobs:
   delete-releases:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Install GitHub CLI
         run: |
           sudo apt update
-          sudo apt install -y gh
+          sudo apt install -y gh jq
 
       - name: Delete all releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" > token.txt
-          gh auth login --with-token < token.txt
-          rm token.txt
+          # 使用API直接获取所有release ID
+          releases=$(gh api repos/$GITHUB_REPOSITORY/releases --jq '.[].id')
           
-          gh release list | awk '{print $1}' | xargs -I {} gh release delete --yes {}
-          echo "All releases deleted"
+          # 循环删除每个release
+          for release_id in $releases; do
+            echo "Deleting release ID: $release_id"
+            gh api -X DELETE repos/$GITHUB_REPOSITORY/releases/$release_id
+          done
+          
+          # 验证是否全部删除
+          remaining=$(gh api repos/$GITHUB_REPOSITORY/releases | jq length)
+          if [ "$remaining" -eq "0" ]; then
+            echo "✅ All releases deleted successfully"
+          else
+            echo "❌ Failed to delete all releases. Remaining: $remaining"
+            exit 1
+          fi
