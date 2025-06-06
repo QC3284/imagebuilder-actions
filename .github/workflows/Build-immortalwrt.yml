@@ -8,12 +8,11 @@ on:
     paths:
       - 'config/*'
 
-.jobs:
+jobs:
   config:
     name: ⚙️ Load Configuration
     runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
+     matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
     - name: 🛬 Checkout Repository
       uses: actions/checkout@v4
