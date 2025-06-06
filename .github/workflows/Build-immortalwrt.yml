@@ -128,8 +128,8 @@ jobs:
           echo "🔍 Checking: $URL"
           if wget -q --spider "$URL"; then
             echo "✅ Found valid ImageBuilder at: $URL"
-            # 使用axel加速下载（32线程）
-            axel -n 32 -o imagebuilder.tar.zst "$URL"
+            # 使用axel加速下载（64线程）
+            axel -n 64 -o imagebuilder.tar.zst "$URL"
             if [ $? -eq 0 ]; then
               echo "🚀 Downloaded with axel successfully"
               FOUND=1
