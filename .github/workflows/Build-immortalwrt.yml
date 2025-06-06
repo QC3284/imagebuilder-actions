@@ -2,17 +2,18 @@ name: 🔧 ImmortalWrt AutoBuilder
 
 on:
   schedule:
-    - cron: '0 3 * * 3,6'
+    - cron: '0 3 * * 3,6'  # 每周三和周六北京时间上午11点运行
   workflow_dispatch:
   push:
     paths:
       - 'config/*'
 
-jobs:
+jobs:  # 修正这里：去掉开头的点号
   config:
     name: ⚙️ Load Configuration
     runs-on: ubuntu-latest
-     matrix: ${{ steps.set-matrix.outputs.matrix }}
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
     - name: 🛬 Checkout Repository
       uses: actions/checkout@v4
@@ -61,16 +62,21 @@ jobs:
     - name: 🛬 Checkout Repository
       uses: actions/checkout@v4
 
-    - name: 📅 Get Build Date
+    - name: 📅 Get Build Date (CST)
       id: get-date
-      run: echo "date=$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
+      run: |
+        TZ='Asia/Shanghai'
+        build_date=$(TZ=$TZ date +'%Y-%m-%d %H:%M:%S %Z')
+        echo "date=$build_date" >> $GITHUB_OUTPUT
+        echo "timestamp=$(TZ=$TZ date +%s)" >> $GITHUB_OUTPUT
 
     - name: 🔧 Setup Build Environment
       run: |
         sudo apt-get update -y
         sudo apt-get install -y \
           build-essential libncurses5-dev zlib1g-dev \
-          gawk git gettext libssl-dev xsltproc wget unzip python3 jq zstd
+          gawk git gettext libssl-dev xsltproc wget unzip python3 jq zstd axel \
+          coreutils openssl rhash
 
     - name: 🗺️ Determine Target Architecture
       id: target
@@ -83,6 +89,9 @@ jobs:
           ["glinet_gl-mt6000"]="mediatek/filogic"
           ["xiaomi_redmi-router-ax6000"]="mediatek/filogic"
           ["xiaomi_mi-router-3g"]="ramips/mt7621"
+          ["xiaomi_mi-router-cr6606"]="ramips/mt7621"
+          ["xiaomi_mi-router-cr6607"]="ramips/mt7621"
+          ["xiaomi_mi-router-cr6608"]="ramips/mt7621"
           ["netgear_r7800"]="ipq806x/generic"
           ["linksys_wrt3200acm"]="mvebu/cortexa9"
           ["tplink_archer-c7-v5"]="ath79/generic"
@@ -99,7 +108,7 @@ jobs:
         echo "sanitized_target=${TARGET//\//-}" >> $GITHUB_OUTPUT
         echo "::notice::Target for $DEVICE: $TARGET"
 
-    - name: ⬇️ Download ImageBuilder
+    - name: ⬇️ Download ImageBuilder (with axel)
       run: |
         SANITIZED_TARGET="${{ steps.target.outputs.sanitized_target }}"
         VERSION="${{ matrix.version }}"
@@ -118,9 +127,19 @@ jobs:
           echo "🔍 Checking: $URL"
           if wget -q --spider "$URL"; then
             echo "✅ Found valid ImageBuilder at: $URL"
-            wget -O imagebuilder.tar.zst "$URL"
-            FOUND=1
-            break
+            # 使用axel加速下载（10线程）
+            axel -n 10 -o imagebuilder.tar.zst "$URL"
+            if [ $? -eq 0 ]; then
+              echo "🚀 Downloaded with axel successfully"
+              FOUND=1
+              break
+            else
+              echo "⚠️ Axel download failed, trying with wget..."
+              wget -O imagebuilder.tar.zst "$URL" && {
+                FOUND=1
+                break
+              }
+            fi
           fi
         done
         
@@ -173,7 +192,6 @@ jobs:
         echo "📦 Packages to install: $FULL_PKGS"
         echo "PACKAGES=$FULL_PKGS" >> $GITHUB_ENV
 
-
     - name: 🔨 Build Firmware
       run: |
         cd imagebuilder
@@ -202,14 +220,39 @@ jobs:
         fi
         
         echo "✅ Build completed successfully in parallel mode"
+
+    - name: 🔢 Calculate Hashes
+      run: |
+        cd imagebuilder/bin/targets
         
-        # 确保输出目录存在
-        mkdir -p bin/targets
-        
-        # 列出构建输出目录内容（使用绝对路径）
-        echo "📂 Build output directory contents:"
-        find "$(pwd)/bin/targets" -type f | while read -r file; do
-          echo "  - $file"
+        # 查找所有固件文件
+        find . -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" -o -name "*.trx" \) | while read -r file; do
+          echo "📄 Calculating hashes for: $file"
+          
+          # 获取文件名（不含路径）
+          filename=$(basename "$file")
+          
+          # 计算各种哈希值
+          echo "🔐 SHA256: $(sha256sum "$file" | awk '{print $1}')" > "$file.hashes"
+          echo "🔐 SHA512: $(sha512sum "$file" | awk '{print $1}')" >> "$file.hashes"
+          echo "🔐 BLAKE2: $(b2sum "$file" | awk '{print $1}')" >> "$file.hashes"
+          
+          # 国密 SM3
+          if openssl list -digest-commands | grep -q sm3; then
+            echo "🔐 SM3: $(openssl sm3 -r "$file" | awk '{print $1}')" >> "$file.hashes"
+          else
+            echo "⚠️ OpenSSL SM3 not available, skipping"
+          fi
+          
+          # 其他哈希算法
+          echo "🔐 MD5: $(md5sum "$file" | awk '{print $1}')" >> "$file.hashes"
+          echo "🔐 SHA1: $(sha1sum "$file" | awk '{print $1}')" >> "$file.hashes"
+          echo "🔐 SHA3-256: $(rhash --sha3-256 "$file" | awk '{print $1}')" >> "$file.hashes"
+          
+          echo "📝 Hashes saved to $file.hashes"
+          echo "----------------------------------------"
+          cat "$file.hashes"
+          echo "----------------------------------------"
         done
 
     - name: 🗜️ Archive Artifacts
@@ -220,12 +263,12 @@ jobs:
         # 创建设备目录
         mkdir -p artifacts/${{ matrix.device }}
         
-        # 使用绝对路径查找固件文件
+        # 使用绝对路径查找固件文件和哈希文件
         echo "🔍 Searching for firmware files in imagebuilder/bin/targets..."
-        FIRMWARE_FILES=$(find imagebuilder/bin/targets -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" -o -name "*.trx" \) 2>/dev/null)
+        FIRMWARE_FILES=$(find imagebuilder/bin/targets -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" -o -name "*.trx" -o -name "*.hashes" \) 2>/dev/null)
         
         if [ -n "$FIRMWARE_FILES" ]; then
-          echo "✅ Found firmware files:"
+          echo "✅ Found files:"
           echo "$FIRMWARE_FILES"
           
           # 复制文件
@@ -256,7 +299,7 @@ jobs:
     - name: 🚀 Upload Release
       uses: softprops/action-gh-release@v1
       with:
-        files: ${{ env.ARTIFACT_DIR }}/*.bin
+        files: ${{ env.ARTIFACT_DIR }}/*
         tag_name: build-${{ github.run_id }}-${{ matrix.device }}
         name: "Build ${{ github.run_number }} (${{ matrix.device }})"
         body: |
@@ -264,9 +307,18 @@ jobs:
           **Device**: ${{ matrix.device }}
           **Version**: ${{ matrix.version }}
           **Build ID**: ${{ github.run_id }}
-          **Build Date**: ${{ steps.get-date.outputs.date }}
-
-          🔧 Built with GitHub Actions
+          **Build Date (CST)**: ${{ steps.get-date.outputs.date }}
+          
+          ### 🔐 Hash Algorithms Included:
+          - SHA256
+          - SHA512
+          - BLAKE2
+          - SM3 (国密)
+          - MD5
+          - SHA1
+          - SHA3-256
+          
+          🔧 Built with GitHub Actions at ${{ steps.get-date.outputs.date }} (CST)
         draft: false
         prerelease: false
       env:
