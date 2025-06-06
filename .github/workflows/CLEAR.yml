@@ -1,36 +1,21 @@
-name: Clear All Releases
+name: Clear Releases with GH CLI
 
 on:
-  workflow_dispatch:  # 手动触发
+  workflow_dispatch:
 
 jobs:
   delete-releases:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-
-      - name: Install PyGithub
-        run: pip install PyGithub
+      - name: Install GitHub CLI
+        run: |
+          sudo apt update
+          sudo apt install -y gh
 
       - name: Delete all releases
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # 自动生成的token，有repo权限
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          from github import Github
-          import os
-
-          g = Github(os.getenv('GITHUB_TOKEN'))
-          repo = g.get_repo(os.getenv('GITHUB_REPOSITORY'))  # 格式: owner/repo
-
-          # 删除所有release
-          for release in repo.get_releases():
-              print(f"Deleting release: {release.title} (ID: {release.id})")
-              release.delete_release()
-
-          print("All releases have been deleted.")
+          gh auth login --with-token <<< "$GH_TOKEN"
+          gh release list | awk '{print $1}' | xargs -I {} gh release delete --yes {}
+          echo "All releases deleted"
