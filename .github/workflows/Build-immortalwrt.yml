@@ -73,10 +73,8 @@ jobs:
     - name: 🔧 Setup Build Environment
       run: |
         sudo apt-get update -y
-        sudo apt-get install -y \
-          build-essential libncurses5-dev zlib1g-dev \
-          gawk git gettext libssl-dev xsltproc wget unzip python3 jq zstd axel \
-          coreutils openssl rhash
+        sudo apt-get install -y build-essential libncurses5-dev zlib1g-dev gawk git gettext libssl-dev xsltproc wget unzip python3 jq zstd axel coreutils openssl rhash
+        sudo apt-get install -y libncursesw5-dev zlib1g-dev genisoimage xsltproc rsync wget unzip
 
     - name: 🗺️ Determine Target Architecture
       id: target
