@@ -19,5 +19,5 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 循环删除每个release
-          gh release list --limit 1000 | awk '{print $1}' | xargs -I{} gh release delete --yes "{}"
+          # 循环删除每个release和tag
+          gh release list | awk -F '\t' '{print $3}' | while read -r line; do gh release delete -y "$line" --cleanup-tag; done
