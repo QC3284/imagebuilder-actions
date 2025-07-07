@@ -2,7 +2,8 @@ name: 🔧 ImmortalWrt AutoBuilder
 
 on:
   schedule:
-    - cron: '0 3 * * 3,6'  # 每周三和周六北京时间上午11点运行
+    - cron: '0 2 * * *'   # 北京时间10:00 (UTC 2:00)
+    - cron: '0 10 * * *'  # 北京时间18:00 (UTC 10:00)
   workflow_dispatch:
   push:
     paths:
