@@ -1,0 +1,4 @@
+xiaomi_mi-router-3g
+xiaomi_mi-router-cr6606
+xiaomi_mi-router-cr6608
+xiaomi_mi-router-cr6609
