@@ -8,6 +8,8 @@ on:
   push:
     paths:
       - 'config/*'
+      - ‘zdy_fk_pkg/*'
+      - 'zdy_pkg/*'
 
 jobs:
   config:
