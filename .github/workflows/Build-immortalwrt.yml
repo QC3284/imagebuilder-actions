@@ -8,8 +8,8 @@ on:
   push:
     paths:
       - 'config/*'
-      - ‘zdy_fk_pkg/*'
       - 'zdy_pkg/*'
+      - 'zdy_fk_pkg/*'
 
 jobs:
   config:
@@ -169,12 +169,16 @@ jobs:
         mv immortalwrt-imagebuilder-* imagebuilder
         echo "✅ ImageBuilder extracted successfully"
 
-    # ========== 新增自定义软件包处理步骤 ==========
+    # ========== 修复自定义包处理 ==========
     - name: 📦 Process Custom Packages
       id: custom-pkgs
       run: |
         cd imagebuilder
         echo "🔍 Checking for custom package configurations..."
+        echo "Current directory: $(pwd)"
+        echo "Files in repository root:"
+        ls -la ../../
+
         CUSTOM_PKGS=""
 
         # 处理 zdy_rjb.txt 和 zdy_pkg
@@ -241,8 +245,9 @@ jobs:
 
         cd $GITHUB_WORKSPACE
         echo "::notice::Custom package processing completed"
-    # ========== 结束新增步骤 ==========
+    # ========== 结束修复 ==========
 
+    # ========== 修复包列表顺序问题 ==========
     - name: 📦 Prepare Packages
       id: packages
       run: |
@@ -261,8 +266,8 @@ jobs:
           exit 1
         fi
 
-        # 添加必要的基础包
-        BASE_PKGS="luci luci-theme-bootstrap -dnsmasq dnsmasq-full"
+        # 添加必要的基础包 - 将移除包放在开头
+        BASE_PKGS="-dnsmasq dnsmasq-full luci luci-theme-bootstrap"
 
         # 添加自定义包（如果有）
         if [ -n "$custom_pkgs" ]; then
@@ -272,8 +277,10 @@ jobs:
           FULL_PKGS="$BASE_PKGS $PACKAGES"
         fi
 
+        # 确保移除包在安装包之前
         echo "📦 Packages to install: $FULL_PKGS"
         echo "PACKAGES=\"$FULL_PKGS\"" >> $GITHUB_ENV
+    # ========== 结束修复 ==========
 
     - name: 🔨 Build Firmware
       run: |
@@ -285,6 +292,9 @@ jobs:
         MAX_JOBS=$(( NPROC > 4 ? 4 : NPROC ))
 
         echo "🔄 Using $MAX_JOBS parallel jobs for downloading"
+
+        # 打印完整的make命令用于调试
+        echo "Running: make -j$MAX_JOBS image PROFILE=\"${{ matrix.device }}\" PACKAGES=\"$PACKAGES\" FILES=\"../files/\" V=s"
 
         if ! make -j$MAX_JOBS image PROFILE="${{ matrix.device }}" PACKAGES="$PACKAGES" FILES="../files/" V=s; then
           echo "::error::Build failed for ${{ matrix.device }}"
