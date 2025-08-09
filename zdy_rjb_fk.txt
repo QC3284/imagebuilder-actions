@@ -2,3 +2,7 @@ xiaomi_mi-router-3g
 xiaomi_mi-router-cr6606
 xiaomi_mi-router-cr6608
 xiaomi_mi-router-cr6609
+glinet_gl-mt6000
+glinet_gl-mt3000
+glinet_gl-mt2500
+xiaomi_redmi-router-ax6000
