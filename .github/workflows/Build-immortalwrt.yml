@@ -64,6 +64,8 @@ jobs:
     steps:
     - name: 🛬 Checkout Repository
       uses: actions/checkout@v4
+      with:
+        path: 'source'  # 指定检出目录为source
 
     - name: 📅 Get Build Date (CST)
       id: get-date
@@ -169,30 +171,30 @@ jobs:
         mv immortalwrt-imagebuilder-* imagebuilder
         echo "✅ ImageBuilder extracted successfully"
 
-    # ========== 修复自定义包处理 ==========
+    # ========== 修复自定义包处理路径问题 ==========
     - name: 📦 Process Custom Packages
       id: custom-pkgs
       run: |
-        cd imagebuilder
         echo "🔍 Checking for custom package configurations..."
         echo "Current directory: $(pwd)"
         echo "Files in repository root:"
-        ls -la ../../
+        ls -la
 
         CUSTOM_PKGS=""
 
         # 处理 zdy_rjb.txt 和 zdy_pkg
-        if [ -f "../../zdy_rjb.txt" ]; then
+        if [ -f "zdy_rjb.txt" ]; then
           echo "✅ Found zdy_rjb.txt"
-          if grep -q "^${{ matrix.device }}$" "../../zdy_rjb.txt"; then
+          if grep -q "^${{ matrix.device }}$" "zdy_rjb.txt"; then
             echo "🔄 Device ${{ matrix.device }} found in zdy_rjb.txt"
-            if [ -d "../../zdy_pkg" ]; then
+            if [ -d "zdy_pkg" ]; then
               echo "📦 Copying IPKs from zdy_pkg"
-              mkdir -p packages
-              cp -v ../../zdy_pkg/*.ipk packages/
+              # 在imagebuilder目录创建packages文件夹
+              mkdir -p imagebuilder/packages
+              cp -v zdy_pkg/*.ipk imagebuilder/packages/
 
               # 提取包名并添加到变量
-              for ipk in ../../zdy_pkg/*.ipk; do
+              for ipk in zdy_pkg/*.ipk; do
                 pkg_name=$(basename "$ipk" | awk -F '_' '{print $1}')
                 echo "   ➕ Adding package: $pkg_name"
                 CUSTOM_PKGS="$CUSTOM_PKGS $pkg_name"
@@ -208,17 +210,18 @@ jobs:
         fi
 
         # 处理 zdy_rjb_fk.txt 和 zdy_fk_pkg
-        if [ -f "../../zdy_rjb_fk.txt" ]; then
+        if [ -f "zdy_rjb_fk.txt" ]; then
           echo "✅ Found zdy_rjb_fk.txt"
-          if grep -q "^${{ matrix.device }}$" "../../zdy_rjb_fk.txt"; then
+          if grep -q "^${{ matrix.device }}$" "zdy_rjb_fk.txt"; then
             echo "🔄 Device ${{ matrix.device }} found in zdy_rjb_fk.txt"
-            if [ -d "../../zdy_fk_pkg" ]; then
+            if [ -d "zdy_fk_pkg" ]; then
               echo "📦 Copying IPKs from zdy_fk_pkg"
-              mkdir -p packages
-              cp -v ../../zdy_fk_pkg/*.ipk packages/
+              # 在imagebuilder目录创建packages文件夹
+              mkdir -p imagebuilder/packages
+              cp -v zdy_fk_pkg/*.ipk imagebuilder/packages/
 
               # 提取包名并添加到变量
-              for ipk in ../../zdy_fk_pkg/*.ipk; do
+              for ipk in zdy_fk_pkg/*.ipk; do
                 pkg_name=$(basename "$ipk" | awk -F '_' '{print $1}')
                 echo "   ➕ Adding package: $pkg_name"
                 CUSTOM_PKGS="$CUSTOM_PKGS $pkg_name"
@@ -236,18 +239,17 @@ jobs:
         # 去重并设置输出
         if [ -n "$CUSTOM_PKGS" ]; then
           UNIQUE_PKGS=$(echo "$CUSTOM_PKGS" | tr ' ' '\n' | sort -u | tr '\n' ' ')
-          echo "✨ Unique custom packages:$UNIQUE_PKGS"
+          echo "✨ Unique custom packages: $UNIQUE_PKGS"
           echo "custom_pkgs=$UNIQUE_PKGS" >> $GITHUB_ENV
         else
           echo "ℹ️ No custom packages added"
           echo "custom_pkgs=" >> $GITHUB_ENV
         fi
 
-        cd $GITHUB_WORKSPACE
         echo "::notice::Custom package processing completed"
     # ========== 结束修复 ==========
 
-    # ========== 修复包列表顺序问题 ==========
+    # ========== 修复包列表格式问题 ==========
     - name: 📦 Prepare Packages
       id: packages
       run: |
@@ -256,7 +258,7 @@ jobs:
 
         if [ -f "$CUSTOM_PKG_FILE" ]; then
           echo "::notice::Using custom packages for ${{ matrix.device}}"
-          # 过滤掉空行和注释行，并确保格式正确
+          # 过滤掉空行和注释行
           PACKAGES=$(grep -vE '^#|^$' "$CUSTOM_PKG_FILE" | tr '\n' ' ' | sed 's/ *$//')
         elif [ -f "$DEFAULT_PKG_FILE" ]; then
           echo "::notice::Using default packages"
@@ -267,14 +269,16 @@ jobs:
         fi
 
         # 添加必要的基础包 - 将移除包放在开头
-        BASE_PKGS="-dnsmasq dnsmasq-full luci luci-theme-bootstrap"
+        BASE_PKGS="-dnsmasq dnsmasq-full"
+        # 确保基础包总是包含luci
+        LUCI_PKGS="luci luci-theme-bootstrap"
 
         # 添加自定义包（如果有）
         if [ -n "$custom_pkgs" ]; then
           echo "➕ Adding custom packages: $custom_pkgs"
-          FULL_PKGS="$BASE_PKGS $PACKAGES $custom_pkgs"
+          FULL_PKGS="$BASE_PKGS $LUCI_PKGS $PACKAGES $custom_pkgs"
         else
-          FULL_PKGS="$BASE_PKGS $PACKAGES"
+          FULL_PKGS="$BASE_PKGS $LUCI_PKGS $PACKAGES"
         fi
 
         # 确保包列表格式正确（无多余空格）
@@ -287,12 +291,15 @@ jobs:
         fi
 
         echo "📦 Packages to install: [$FULL_PKGS]"
-        echo "PACKAGES=\"$FULL_PKGS\"" >> $GITHUB_ENV
+        # 直接赋值，不加引号
+        echo "PACKAGES=$FULL_PKGS" >> $GITHUB_ENV
+    # ========== 结束修复 ==========
 
     - name: 🔨 Build Firmware
       run: |
         cd imagebuilder
-        echo "🚀 Building firmware for ${{ matrix.device }} with packages: $PACKAGES"
+        echo "🚀 Building firmware for ${{ matrix.device }}"
+        echo "📦 Packages: $PACKAGES"
 
         # 获取CPU核心数，限制最大并行数
         NPROC=$(nproc)
@@ -301,7 +308,12 @@ jobs:
         echo "🔄 Using $MAX_JOBS parallel jobs for downloading"
 
         # 打印完整的make命令用于调试
-        echo "Running: make -j$MAX_JOBS image PROFILE=\"${{ matrix.device }}\" PACKAGES=\"$PACKAGES\" FILES=\"../files/\" V=s"
+        echo "::group::📝 Build Command"
+        echo "make -j$MAX_JOBS image PROFILE=\"${{ matrix.device }}\" PACKAGES=\"$PACKAGES\" FILES=\"../files/\" V=s"
+        echo "::endgroup::"
+
+        # 确保files目录存在
+        mkdir -p ../files
 
         if ! make -j$MAX_JOBS image PROFILE="${{ matrix.device }}" PACKAGES="$PACKAGES" FILES="../files/" V=s; then
           echo "::error::Build failed for ${{ matrix.device }}"
@@ -323,7 +335,7 @@ jobs:
 
     - name: 🔢 Calculate Hashes
       run: |
-        cd imagebuilder/bin/targets
+        cd bin/targets
 
         # 查找所有固件文件
         find . -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" -o -name "*.trx" \) | while read -r file; do
@@ -358,7 +370,7 @@ jobs:
     - name: 🗜️ Archive Artifacts
       run: |
         # 确保在正确的工作目录
-        cd "$GITHUB_WORKSPACE"
+        cd $GITHUB_WORKSPACE
 
         # 创建设备目录
         mkdir -p artifacts/${{ matrix.device }}
