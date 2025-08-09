@@ -10,14 +10,25 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install GitHub CLI
+      - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y gh jq
+          sudo apt install -y gh jq  # 确保安装 jq 处理 JSON
 
-      - name: Delete all releases
+      - name: Delete all releases and tags
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 循环删除每个release和tag
-          gh release list | awk -F '\t' '{print $3}' | while read -r line; do gh release delete -y "$line" --cleanup-tag; done
+          # 获取所有 release 的标签（JSON 格式）
+          gh release list --limit 1000 --json tagName | jq -r '.[].tagName' | while read -r tag; do
+            # 删除 release 及关联的 tag
+            gh release delete -y "$tag" --cleanup-tag
+            echo "Deleted release and tag: $tag"
+          done
+
+          # 额外清理残留的轻量标签（gh release delete 只删除附注标签）
+          git fetch --tags -f  # 强制获取所有远程标签
+          git ls-remote --tags origin | awk '{print $2}' | cut -d '/' -f 3 | while read -r tag; do
+            git push --delete origin "$tag"
+            echo "Deleted orphaned tag: $tag"
+          done
