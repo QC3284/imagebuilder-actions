@@ -8,6 +8,8 @@ on:
   push:
     paths:
       - 'config/*'
+      - 'zdy_rjb.txt'      # 添加自定义注册文件到触发路径
+      - 'zdy_pkg/**'       # 添加自定义软件包目录到触发路径
 
 jobs:
   config:
@@ -35,9 +37,9 @@ jobs:
         else
           DEVICES=$(jq -r '.[]' config/devices.json)
         fi
-        
+
         VERSION=$(jq -r '.version' config/version.json)
-        
+
         MATRIX_JSON=$(jq -n -c \
           --argjson devices "$(jq -n -c --arg in "$DEVICES" '$in | split("\n") | map(select(. != ""))')" \
           --arg version "$VERSION" \
@@ -47,7 +49,7 @@ jobs:
               version: $version
             })
           }')
-        
+
         echo "matrix=$MATRIX_JSON" >> $GITHUB_OUTPUT
         echo "::notice::Build matrix generated for $VERSION: $MATRIX_JSON"
 
@@ -62,6 +64,9 @@ jobs:
     steps:
     - name: 🛬 Checkout Repository
       uses: actions/checkout@v4
+      with:
+        # 深度克隆确保包含所有历史记录（用于检测文件变更）
+        fetch-depth: 0
 
     - name: 📅 Get Build Date (CST)
       id: get-date
@@ -81,7 +86,7 @@ jobs:
       id: target
       run: |
         DEVICE="${{ matrix.device }}"
-        
+
         declare -A DEVICE_TARGETS=(
           ["glinet_gl-mt3000"]="mediatek/filogic"
           ["glinet_gl-mt2500"]="mediatek/filogic"
@@ -95,14 +100,14 @@ jobs:
           ["linksys_wrt3200acm"]="mvebu/cortexa9"
           ["tplink_archer-c7-v5"]="ath79/generic"
         )
-        
+
         if [[ -n "${DEVICE_TARGETS[$DEVICE]}" ]]; then
           TARGET="${DEVICE_TARGETS[$DEVICE]}"
         else
           echo "::error::Unknown device type: $DEVICE"
           exit 1
         fi
-        
+
         echo "target=$TARGET" >> $GITHUB_OUTPUT
         echo "sanitized_target=${TARGET//\//-}" >> $GITHUB_OUTPUT
         echo "::notice::Target for $DEVICE: $TARGET"
@@ -111,24 +116,24 @@ jobs:
       run: |
         SANITIZED_TARGET="${{ steps.target.outputs.sanitized_target }}"
         VERSION="${{ matrix.version }}"
-        
+
         # 使用官方下载源
         BASE_URL="https://downloads.immortalwrt.org/releases/$VERSION/targets/${{ steps.target.outputs.target }}"
-        
+
         URLS=(
           "$BASE_URL/immortalwrt-imagebuilder-$VERSION-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
           "$BASE_URL/immortalwrt-imagebuilder-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
           "$BASE_URL/immortalwrt-imagebuilder-$VERSION-$SANITIZED_TARGET.Linux-x86_64.tar.xz"
           "$BASE_URL/immortalwrt-imagebuilder-$SANITIZED_TARGET.Linux-x86_64.tar.xz"
         )
-        
+
         FOUND=0
         for URL in "${URLS[@]}"; do
           echo "🔍 Checking: $URL"
           if wget -q --spider "$URL"; then
             echo "✅ Found valid ImageBuilder at: $URL"
             # 使用axel加速下载（64线程）
-            axel -n 64 -o imagebuilder.tar.zst "$URL"
+            axel -n 128 -o imagebuilder.tar.zst "$URL"
             if [ $? -eq 0 ]; then
               echo "🚀 Downloaded with axel successfully"
               FOUND=1
@@ -142,7 +147,7 @@ jobs:
             fi
           fi
         done
-        
+
         if [ "$FOUND" -eq 0 ]; then
           echo "::error::ImageBuilder not found at any URL"
           for URL in "${URLS[@]}"; do
@@ -163,16 +168,55 @@ jobs:
           echo "::error::Unknown archive format"
           exit 1
         fi
-        
+
         mv immortalwrt-imagebuilder-* imagebuilder
         echo "✅ ImageBuilder extracted successfully"
+
+    # ===== 新增自定义软件包处理步骤 =====
+    - name: 📦 Add Custom Packages (if any)
+      id: custom-pkg
+      run: |
+        # 检查自定义注册文件是否存在
+        if [ ! -f "zdy_rjb.txt" ]; then
+          echo "::notice::No custom package registry (zdy_rjb.txt) found. Skipping."
+          exit 0
+        fi
+
+        # 检查当前设备是否在注册表中
+        DEVICE="${{ matrix.device }}"
+        if ! grep -q "^$DEVICE$" zdy_rjb.txt; then
+          echo "::notice::Device $DEVICE not in custom package registry. Skipping."
+          exit 0
+        fi
+
+        # 检查自定义软件包目录是否存在
+        if [ ! -d "zdy_pkg" ]; then
+          echo "::warning::Custom package directory 'zdy_pkg' not found."
+          exit 0
+        fi
+
+        # 在ImageBuilder中创建packages目录
+        PKG_DIR="imagebuilder/packages"
+        mkdir -p "$PKG_DIR"
+
+        # 复制所有.ipk文件到ImageBuilder的packages目录
+        echo "📥 Copying custom packages for $DEVICE..."
+        find zdy_pkg -name '*.ipk' -exec cp -v {} "$PKG_DIR" \;
+
+        # 统计复制的文件数量
+        COUNT=$(ls "$PKG_DIR"/*.ipk 2>/dev/null | wc -l)
+        if [ "$COUNT" -gt 0 ]; then
+          echo "::notice::Copied $COUNT custom package(s) to ImageBuilder"
+        else
+          echo "::warning::No .ipk files found in zdy_pkg directory"
+        fi
 
     - name: 📦 Prepare Packages
       id: packages
       run: |
         CUSTOM_PKG_FILE="config/packages_${{ matrix.device }}.txt"
         DEFAULT_PKG_FILE="config/default_packages.txt"
-        
+
         if [ -f "$CUSTOM_PKG_FILE" ]; then
           echo "::notice::Using custom packages for ${{ matrix.device}}"
           # 过滤掉空行和注释行
@@ -184,11 +228,21 @@ jobs:
           echo "::error::No package list found!"
           exit 1
         fi
-        
+
         # 添加必要的基础包
         BASE_PKGS="luci luci-theme-bootstrap -dnsmasq dnsmasq-full"
         FULL_PKGS="$BASE_PKGS $PACKAGES"
-        
+
+        # 如果添加了自定义包，包含进构建变量
+        if [ -d "imagebuilder/packages" ] && [ -n "$(ls imagebuilder/packages/*.ipk 2>/dev/null)" ]; then
+          echo "::notice::Including custom packages in build"
+          # 提取包名（去除版本信息）
+          CUSTOM_PKG_NAMES=$(find imagebuilder/packages -name '*.ipk' -exec basename {} \; | sed -E 's/_[0-9].*\.ipk$//')
+          CUSTOM_PKG_LIST=$(echo "$CUSTOM_PKG_NAMES" | tr '\n' ' ')
+          FULL_PKGS="$FULL_PKGS $CUSTOM_PKG_LIST"
+          echo "🔧 Custom packages added: $CUSTOM_PKG_LIST"
+        fi
+
         echo "📦 Packages to install: $FULL_PKGS"
         echo "PACKAGES=$FULL_PKGS" >> $GITHUB_ENV
 
@@ -196,59 +250,59 @@ jobs:
       run: |
         cd imagebuilder
         echo "🚀 Building firmware for ${{ matrix.device }} with packages: $PACKAGES"
-        
+
         # 获取CPU核心数，限制最大并行数
         NPROC=$(nproc)
         MAX_JOBS=$(( NPROC > 4 ? 4 : NPROC ))
-        
+
         echo "🔄 Using $MAX_JOBS parallel jobs for downloading"
-        
+
         if ! make -j$MAX_JOBS image PROFILE="${{ matrix.device }}" PACKAGES="$PACKAGES" FILES="../files/" V=s; then
           echo "::error::Build failed for ${{ matrix.device }}"
-          
+
           # 收集错误日志
           if [ -d "logs" ]; then
             ERRORS=$(grep -i 'error\|failed\|undefined' logs/*.log | head -n 20 || true)
           else
             ERRORS="No logs directory found"
           fi
-          
+
           echo "::error::Build errors:"
           echo "$ERRORS"
-          
+
           exit 1
         fi
-        
+
         echo "✅ Build completed successfully in parallel mode"
 
     - name: 🔢 Calculate Hashes
       run: |
         cd imagebuilder/bin/targets
-        
+
         # 查找所有固件文件
         find . -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" -o -name "*.trx" \) | while read -r file; do
           echo "📄 Calculating hashes for: $file"
-          
+
           # 获取文件名（不含路径）
           filename=$(basename "$file")
-          
+
           # 计算各种哈希值
           echo "🔐 SHA256: $(sha256sum "$file" | awk '{print $1}')" > "$file.hashes"
           echo "🔐 SHA512: $(sha512sum "$file" | awk '{print $1}')" >> "$file.hashes"
           echo "🔐 BLAKE2: $(b2sum "$file" | awk '{print $1}')" >> "$file.hashes"
-          
+
           # 国密 SM3
           if openssl list -digest-commands | grep -q sm3; then
             echo "🔐 SM3: $(openssl sm3 -r "$file" | awk '{print $1}')" >> "$file.hashes"
           else
             echo "⚠️ OpenSSL SM3 not available, skipping"
           fi
-          
+
           # 其他哈希算法
           echo "🔐 MD5: $(md5sum "$file" | awk '{print $1}')" >> "$file.hashes"
           echo "🔐 SHA1: $(sha1sum "$file" | awk '{print $1}')" >> "$file.hashes"
           echo "🔐 SHA3-256: $(rhash --sha3-256 "$file" | awk '{print $1}')" >> "$file.hashes"
-          
+
           echo "📝 Hashes saved to $file.hashes"
           echo "----------------------------------------"
           cat "$file.hashes"
@@ -259,18 +313,18 @@ jobs:
       run: |
         # 确保在正确的工作目录
         cd "$GITHUB_WORKSPACE"
-        
+
         # 创建设备目录
         mkdir -p artifacts/${{ matrix.device }}
-        
+
         # 使用绝对路径查找固件文件和哈希文件
         echo "🔍 Searching for firmware files in imagebuilder/bin/targets..."
         FIRMWARE_FILES=$(find imagebuilder/bin/targets -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" -o -name "*.trx" -o -name "*.hashes" \) 2>/dev/null)
-        
+
         if [ -n "$FIRMWARE_FILES" ]; then
           echo "✅ Found files:"
           echo "$FIRMWARE_FILES"
-          
+
           # 复制文件
           echo "$FIRMWARE_FILES" | while read -r file; do
             echo "📦 Copying: $file"
@@ -282,7 +336,7 @@ jobs:
           find imagebuilder/bin -type d -ls || true
           exit 1
         fi
-        
+
         # 检查是否复制了文件
         if [ -z "$(ls -A artifacts/${{ matrix.device }})" ]; then
           echo "::error::No files copied to artifacts directory!"
@@ -292,7 +346,7 @@ jobs:
         else
           echo "✅ Copied $(ls artifacts/${{ matrix.device }} | wc -l) files to artifacts/${{ matrix.device }}"
         fi
-        
+
         echo "DEVICE=${{ matrix.device }}" >> $GITHUB_ENV
         echo "ARTIFACT_DIR=artifacts/${{ matrix.device }}" >> $GITHUB_ENV
 
@@ -308,7 +362,7 @@ jobs:
           **Version**: ${{ matrix.version }}
           **Build ID**: ${{ github.run_id }}
           **Build Date (CST)**: ${{ steps.get-date.outputs.date }}
-          
+
           ### 🔐 Hash Algorithms Included:
           - SHA256
           - SHA512
@@ -317,7 +371,10 @@ jobs:
           - MD5
           - SHA1
           - SHA3-256
-          
+
+          ### 🧩 Custom Packages:
+          ${{ steps.custom-pkg.outcome == 'success' && '✅ Included' || '❌ Not included' }}
+
           🔧 Built with GitHub Actions at ${{ steps.get-date.outputs.date }} (CST)
         draft: false
         prerelease: false
