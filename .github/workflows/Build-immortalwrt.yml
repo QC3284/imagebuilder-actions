@@ -8,8 +8,6 @@ on:
   push:
     paths:
       - 'config/*'
-      - 'zdy_rjb.txt'      # 添加自定义注册文件到触发路径
-      - 'zdy_pkg/**'       # 添加自定义软件包目录到触发路径
 
 jobs:
   config:
@@ -64,9 +62,6 @@ jobs:
     steps:
     - name: 🛬 Checkout Repository
       uses: actions/checkout@v4
-      with:
-        # 深度克隆确保包含所有历史记录（用于检测文件变更）
-        fetch-depth: 0
 
     - name: 📅 Get Build Date (CST)
       id: get-date
@@ -172,44 +167,79 @@ jobs:
         mv immortalwrt-imagebuilder-* imagebuilder
         echo "✅ ImageBuilder extracted successfully"
 
-    # ===== 新增自定义软件包处理步骤 =====
-    - name: 📦 Add Custom Packages (if any)
-      id: custom-pkg
+    # ========== 新增自定义软件包处理步骤 ==========
+    - name: 📦 Process Custom Packages
+      id: custom-pkgs
       run: |
-        # 检查自定义注册文件是否存在
-        if [ ! -f "zdy_rjb.txt" ]; then
-          echo "::notice::No custom package registry (zdy_rjb.txt) found. Skipping."
-          exit 0
-        fi
+        cd imagebuilder
+        echo "🔍 Checking for custom package configurations..."
+        CUSTOM_PKGS=""
 
-        # 检查当前设备是否在注册表中
-        DEVICE="${{ matrix.device }}"
-        if ! grep -q "^$DEVICE$" zdy_rjb.txt; then
-          echo "::notice::Device $DEVICE not in custom package registry. Skipping."
-          exit 0
-        fi
+        # 处理 zdy_rjb.txt 和 zdy_pkg
+        if [ -f "../../zdy_rjb.txt" ]; then
+          echo "✅ Found zdy_rjb.txt"
+          if grep -q "^${{ matrix.device }}$" "../../zdy_rjb.txt"; then
+            echo "🔄 Device ${{ matrix.device }} found in zdy_rjb.txt"
+            if [ -d "../../zdy_pkg" ]; then
+              echo "📦 Copying IPKs from zdy_pkg"
+              mkdir -p packages
+              cp -v ../../zdy_pkg/*.ipk packages/
 
-        # 检查自定义软件包目录是否存在
-        if [ ! -d "zdy_pkg" ]; then
-          echo "::warning::Custom package directory 'zdy_pkg' not found."
-          exit 0
-        fi
-
-        # 在ImageBuilder中创建packages目录
-        PKG_DIR="imagebuilder/packages"
-        mkdir -p "$PKG_DIR"
-
-        # 复制所有.ipk文件到ImageBuilder的packages目录
-        echo "📥 Copying custom packages for $DEVICE..."
-        find zdy_pkg -name '*.ipk' -exec cp -v {} "$PKG_DIR" \;
-
-        # 统计复制的文件数量
-        COUNT=$(ls "$PKG_DIR"/*.ipk 2>/dev/null | wc -l)
-        if [ "$COUNT" -gt 0 ]; then
-          echo "::notice::Copied $COUNT custom package(s) to ImageBuilder"
+              # 提取包名并添加到变量
+              for ipk in ../../zdy_pkg/*.ipk; do
+                pkg_name=$(basename "$ipk" | awk -F '_' '{print $1}')
+                echo "   ➕ Adding package: $pkg_name"
+                CUSTOM_PKGS="$CUSTOM_PKGS $pkg_name"
+              done
+            else
+              echo "⚠️ zdy_pkg directory not found"
+            fi
+          else
+            echo "ℹ️ Device ${{ matrix.device }} not in zdy_rjb.txt"
+          fi
         else
-          echo "::warning::No .ipk files found in zdy_pkg directory"
+          echo "ℹ️ zdy_rjb.txt not found"
         fi
+
+        # 处理 zdy_rjb_fk.txt 和 zdy_fk_pkg
+        if [ -f "../../zdy_rjb_fk.txt" ]; then
+          echo "✅ Found zdy_rjb_fk.txt"
+          if grep -q "^${{ matrix.device }}$" "../../zdy_rjb_fk.txt"; then
+            echo "🔄 Device ${{ matrix.device }} found in zdy_rjb_fk.txt"
+            if [ -d "../../zdy_fk_pkg" ]; then
+              echo "📦 Copying IPKs from zdy_fk_pkg"
+              mkdir -p packages
+              cp -v ../../zdy_fk_pkg/*.ipk packages/
+
+              # 提取包名并添加到变量
+              for ipk in ../../zdy_fk_pkg/*.ipk; do
+                pkg_name=$(basename "$ipk" | awk -F '_' '{print $1}')
+                echo "   ➕ Adding package: $pkg_name"
+                CUSTOM_PKGS="$CUSTOM_PKGS $pkg_name"
+              done
+            else
+              echo "⚠️ zdy_fk_pkg directory not found"
+            fi
+          else
+            echo "ℹ️ Device ${{ matrix.device }} not in zdy_rjb_fk.txt"
+          fi
+        else
+          echo "ℹ️ zdy_rjb_fk.txt not found"
+        fi
+
+        # 去重并设置输出
+        if [ -n "$CUSTOM_PKGS" ]; then
+          UNIQUE_PKGS=$(echo "$CUSTOM_PKGS" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+          echo "✨ Unique custom packages:$UNIQUE_PKGS"
+          echo "custom_pkgs=$UNIQUE_PKGS" >> $GITHUB_ENV
+        else
+          echo "ℹ️ No custom packages added"
+          echo "custom_pkgs=" >> $GITHUB_ENV
+        fi
+
+        cd $GITHUB_WORKSPACE
+        echo "::notice::Custom package processing completed"
+    # ========== 结束新增步骤 ==========
 
     - name: 📦 Prepare Packages
       id: packages
@@ -231,20 +261,17 @@ jobs:
 
         # 添加必要的基础包
         BASE_PKGS="luci luci-theme-bootstrap -dnsmasq dnsmasq-full"
-        FULL_PKGS="$BASE_PKGS $PACKAGES"
 
-        # 如果添加了自定义包，包含进构建变量
-        if [ -d "imagebuilder/packages" ] && [ -n "$(ls imagebuilder/packages/*.ipk 2>/dev/null)" ]; then
-          echo "::notice::Including custom packages in build"
-          # 提取包名（去除版本信息）
-          CUSTOM_PKG_NAMES=$(find imagebuilder/packages -name '*.ipk' -exec basename {} \; | sed -E 's/_[0-9].*\.ipk$//')
-          CUSTOM_PKG_LIST=$(echo "$CUSTOM_PKG_NAMES" | tr '\n' ' ')
-          FULL_PKGS="$FULL_PKGS $CUSTOM_PKG_LIST"
-          echo "🔧 Custom packages added: $CUSTOM_PKG_LIST"
+        # 添加自定义包（如果有）
+        if [ -n "$custom_pkgs" ]; then
+          echo "➕ Adding custom packages: $custom_pkgs"
+          FULL_PKGS="$BASE_PKGS $PACKAGES $custom_pkgs"
+        else
+          FULL_PKGS="$BASE_PKGS $PACKAGES"
         fi
 
         echo "📦 Packages to install: $FULL_PKGS"
-        echo "PACKAGES=$FULL_PKGS" >> $GITHUB_ENV
+        echo "PACKAGES=\"$FULL_PKGS\"" >> $GITHUB_ENV
 
     - name: 🔨 Build Firmware
       run: |
@@ -371,9 +398,6 @@ jobs:
           - MD5
           - SHA1
           - SHA3-256
-
-          ### 🧩 Custom Packages:
-          ${{ steps.custom-pkg.outcome == 'success' && '✅ Included' || '❌ Not included' }}
 
           🔧 Built with GitHub Actions at ${{ steps.get-date.outputs.date }} (CST)
         draft: false
