@@ -256,11 +256,11 @@ jobs:
 
         if [ -f "$CUSTOM_PKG_FILE" ]; then
           echo "::notice::Using custom packages for ${{ matrix.device}}"
-          # 过滤掉空行和注释行
-          PACKAGES=$(grep -vE '^#|^$' "$CUSTOM_PKG_FILE" | tr '\n' ' ')
+          # 过滤掉空行和注释行，并确保格式正确
+          PACKAGES=$(grep -vE '^#|^$' "$CUSTOM_PKG_FILE" | tr '\n' ' ' | sed 's/ *$//')
         elif [ -f "$DEFAULT_PKG_FILE" ]; then
           echo "::notice::Using default packages"
-          PACKAGES=$(grep -vE '^#|^$' "$DEFAULT_PKG_FILE" | tr '\n' ' ')
+          PACKAGES=$(grep -vE '^#|^$' "$DEFAULT_PKG_FILE" | tr '\n' ' ' | sed 's/ *$//')
         else
           echo "::error::No package list found!"
           exit 1
@@ -277,10 +277,17 @@ jobs:
           FULL_PKGS="$BASE_PKGS $PACKAGES"
         fi
 
-        # 确保移除包在安装包之前
-        echo "📦 Packages to install: $FULL_PKGS"
+        # 确保包列表格式正确（无多余空格）
+        FULL_PKGS=$(echo "$FULL_PKGS" | sed 's/  */ /g' | sed 's/^ *//' | sed 's/ *$//')
+
+        # 检查包列表是否为空
+        if [ -z "$FULL_PKGS" ]; then
+          echo "::error::Package list is empty after processing!"
+          exit 1
+        fi
+
+        echo "📦 Packages to install: [$FULL_PKGS]"
         echo "PACKAGES=\"$FULL_PKGS\"" >> $GITHUB_ENV
-    # ========== 结束修复 ==========
 
     - name: 🔨 Build Firmware
       run: |
