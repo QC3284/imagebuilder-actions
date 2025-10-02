@@ -287,7 +287,7 @@ jobs:
         cd imagebuilder/bin/targets
 
         # 查找所有固件文件
-        find . -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" -o -name "*.trx" \) | while read -r file; do
+        find . -type f \( -name "*.bin" -o -name "*.img" -o -name "*.itb" -o -name "*.fip" -o -name "*.gz" -o -name "*.trx" \) | while read -r file; do
           echo "📄 Calculating hashes for: $file"
 
           # 获取文件名（不含路径）
