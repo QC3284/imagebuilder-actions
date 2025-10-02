@@ -326,7 +326,7 @@ jobs:
 
         # 使用绝对路径查找固件文件和哈希文件
         echo "🔍 Searching for firmware files in imagebuilder/bin/targets..."
-        FIRMWARE_FILES=$(find imagebuilder/bin/targets -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" -o -name "*.trx" -o -name "*.hashes" \) 2>/dev/null)
+        FIRMWARE_FILES=$(find imagebuilder/bin/targets -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" -o -name "*.trx" -o -name "*.itb" -o -name "*.fip" -o -name "*.hashes" \) 2>/dev/null)
 
         if [ -n "$FIRMWARE_FILES" ]; then
           echo "✅ Found files:"
