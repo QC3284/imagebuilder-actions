@@ -88,6 +88,7 @@ jobs:
           ["glinet_gl-mt3000"]="mediatek/filogic"
           ["glinet_gl-mt2500"]="mediatek/filogic"
           ["glinet_gl-mt6000"]="mediatek/filogic"
+          ["konka_komi-a31"]="mediatek/filogic"
           ["xiaomi_redmi-router-ax6000"]="mediatek/filogic"
           ["xiaomi_mi-router-3g"]="ramips/mt7621"
           ["xiaomi_mi-router-cr6606"]="ramips/mt7621"
