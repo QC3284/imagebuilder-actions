@@ -1,7 +1,9 @@
 name: Clear All Releases
 
 on:
-  workflow_dispatch:  # 手动触发
+  schedule:
+    - cron: '0 1 * * 0'   # 每周日UTC时间1:00 (北京时间9:00)
+  workflow_dispatch:
 
 jobs:
   delete-releases:
