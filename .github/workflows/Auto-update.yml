@@ -2,8 +2,9 @@ name: OpenClash Update Check
 
 on:
   schedule:
-    # 每天北京时间12点运行 (UTC+8 对应 UTC 4:00)
-    - cron: '0 4 * * *'
+    # 每天北京时间11:00和23:00运行 (UTC+8 对应 UTC 4:00)
+    - cron: '0 3 * * *'
+    - cron: '0 15 * * *'
   workflow_dispatch: # 允许手动运行
 
 jobs:
