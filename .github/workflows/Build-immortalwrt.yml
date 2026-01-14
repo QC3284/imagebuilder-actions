@@ -116,7 +116,7 @@ jobs:
         VERSION="${{ matrix.version }}"
 
         # 使用官方下载源
-        BASE_URL="https://downloads.immortalwrt.org/releases/$VERSION/targets/${{ steps.target.outputs.target }}"
+        BASE_URL="https://immortalwrt.kyarucloud.moe/releases/$VERSION/targets/${{ steps.target.outputs.target }}"
 
         URLS=(
           "$BASE_URL/immortalwrt-imagebuilder-$VERSION-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
