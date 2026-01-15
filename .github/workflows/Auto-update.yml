@@ -74,7 +74,7 @@ jobs:
       id: download_package
       if: steps.check_file.outputs.file_exists == 'true'
       run: |
-        PACKAGE_URL="https://downloads.immortalwrt.org/releases/24.10.4/packages/aarch64_cortex-a53/luci/${{ steps.get_version.outputs.latest_package }}"
+        PACKAGE_URL="https://immortalwrt.kyarucloud.moe/releases/24.10.4/packages/aarch64_cortex-a53/luci/${{ steps.get_version.outputs.latest_package }}"
         echo "Downloading: $PACKAGE_URL"
         
         # 下载文件
