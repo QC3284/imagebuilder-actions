@@ -131,7 +131,7 @@ jobs:
           if wget -q --spider "$URL"; then
             echo "✅ Found valid ImageBuilder at: $URL"
             # 使用axel加速下载（64线程）
-            axel -n 128 -o imagebuilder.tar.zst "$URL"
+            axel -n 64 -o imagebuilder.tar.zst "$URL"
             if [ $? -eq 0 ]; then
               echo "🚀 Downloaded with axel successfully"
               FOUND=1
