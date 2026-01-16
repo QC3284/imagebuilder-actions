@@ -77,65 +77,71 @@ jobs:
       run: |
         sudo apt-get update -y
         sudo apt-get install -y build-essential libncurses5-dev zlib1g-dev gawk git gettext libssl-dev xsltproc wget unzip python3 jq zstd axel coreutils openssl rhash
-        sudo apt-get install -y libncursesw5-dev zlib1g-dev genisoimage xsltproc rsync wget unzip dnsmasq stunnel4 net-tools resolvconf
+        sudo apt-get install -y libncursesw5-dev zlib1g-dev genisoimage xsltproc rsync wget unzip dnsmasq stunnel4 net-tools resolvconf python3 python3-pip python3-venv iptables-persistent net-tools
 
-    - name: Configure DNS redirection
+    - name: Create mitmproxy redirect script
       run: |
-        # 解析目标域名 IP
-        TARGET_IP=$(dig +short immortalwrt.kyarucloud.moe | head -1)
+        cat > /tmp/redirect_script.py << 'EOF'
+        from mitmproxy import http
+        import re
         
-        # 配置 hosts 文件
-        echo "$TARGET_IP downloads.immortalwrt.org" | sudo tee -a /etc/hosts
-        
-        # 配置 dnsmasq
-        cat << EOF | sudo tee /etc/dnsmasq.conf
-        listen-address=127.0.0.1
-        bind-interfaces
-        domain-needed
-        bogus-priv
-        no-hosts
-        addn-hosts=/etc/hosts.custom
+        def request(flow: http.HTTPFlow) -> None:
+            # 检查是否为目标域名
+            if flow.request.pretty_host == "downloads.immortalwrt.org":
+                # 修改请求目标
+                flow.request.host = "immortalwrt.kyarucloud.moe"
+                flow.request.scheme = "https"
+                flow.request.port = 443
+                # 更新 Host 头
+                flow.request.headers["Host"] = "immortalwrt.kyarucloud.moe"
+                
+                # 禁用 SSL 验证（因为证书不同）
+                flow.request.verify = False
         EOF
         
-        echo "$TARGET_IP downloads.immortalwrt.org" | sudo tee /etc/hosts.custom
-        
-        # 启动 dnsmasq
-        sudo systemctl restart dnsmasq
-        
-        # 配置 DNS
-        echo "nameserver 127.0.0.1" | sudo tee /etc/resolv.conf
-        echo "nameserver 8.8.8.8" | sudo tee -a /etc/resolv.conf
-        
-    - name: Setup SSL proxy with stunnel
+    - name: Start mitmproxy in background
       run: |
-        # 创建 stunnel 配置
-        cat << EOF | sudo tee /etc/stunnel/stunnel.conf
-        client = yes
-        [https-proxy]
-        accept = 127.0.0.1:8443
-        connect = immortalwrt.kyarucloud.moe:443
-        verifyChain = no
-        EOF
+        pip3 install mitmproxy
         
-        # 启动 stunnel
-        sudo systemctl restart stunnel4
+        # 生成自签名 CA 证书
+        mkdir -p ~/.mitmproxy
+        mitmproxy --mode transparent --showhost &
+        sleep 5
+        pkill mitmproxy
         
-    - name: Configure system proxy
+        # 启动透明代理
+        mitmdump --mode transparent \
+                 --ssl-insecure \
+                 --set confdir=~/.mitmproxy \
+                 -s /tmp/redirect_script.py \
+                 --listen-host 127.0.0.1 \
+                 --listen-port 8080 &
+        
+        # 等待代理启动
+        sleep 3
+        
+    - name: Configure iptables for transparent proxy
       run: |
-        # 设置环境变量
-        echo "http_proxy=http://127.0.0.1:8443" >> $GITHUB_ENV
-        echo "https_proxy=http://127.0.0.1:8443" >> $GITHUB_ENV
-        echo "HTTP_PROXY=http://127.0.0.1:8443" >> $GITHUB_ENV
-        echo "HTTPS_PROXY=http://127.0.0.1:8443" >> $GITHUB_ENV
+        # 启用 IP 转发
+        sudo sysctl -w net.ipv4.ip_forward=1
         
-        # 设置 npm 和 git 代理
-        echo "npm_config_proxy=http://127.0.0.1:8443" >> $GITHUB_ENV
-        echo "GIT_PROXY=http://127.0.0.1:8443" >> $GITHUB_ENV
+        # 设置 iptables 规则
+        sudo iptables -t nat -A OUTPUT -p tcp --dport 443 -d downloads.immortalwrt.org -j REDIRECT --to-port 8080
+        sudo iptables -t nat -A OUTPUT -p tcp --dport 80 -d downloads.immortalwrt.org -j REDIRECT --to-port 8080
         
-        # 禁用 SSL 验证（因为证书不同）
-        echo "CURL_CA_BUNDLE=" >> $GITHUB_ENV
-        echo "NODE_TLS_REJECT_UNAUTHORIZED=0" >> $GITHUB_ENV
-        echo "GIT_SSL_NO_VERIFY=true" >> $GITHUB_ENV
+        # 保存规则
+        sudo iptables-save > /tmp/iptables.rules
+        
+    - name: Configure SSL trust for mitmproxy
+      run: |
+        # 导出 mitmproxy CA 证书
+        cat ~/.mitmproxy/mitmproxy-ca-cert.pem | sudo tee /usr/local/share/ca-certificates/mitmproxy.crt
+        sudo update-ca-certificates
+        
+        # 设置环境变量信任自签名证书
+        echo "REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt" >> $GITHUB_ENV
+        echo "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" >> $GITHUB_ENV
+        
 
     - name: 🗺️ Determine Target Architecture
       id: target
