@@ -70,16 +70,17 @@ jobs:
       run: |
         TZ='Asia/Shanghai'
         build_date=$(TZ=$TZ date +'%Y-%m-%d %H:%M:%S %Z')
+        formatted_date=$(TZ=$TZ date +'%Y%m%d%H%M%S')
         echo "date=$build_date" >> $GITHUB_OUTPUT
+        echo "formatted_date=$formatted_date" >> $GITHUB_OUTPUT
         echo "timestamp=$(TZ=$TZ date +%s)" >> $GITHUB_OUTPUT
+        echo "::notice::Build date: $formatted_date"
 
     - name: 🔧 Setup Build Environment
       run: |
         sudo apt-get update -y
         sudo apt-get install -y build-essential libncurses5-dev zlib1g-dev gawk git gettext libssl-dev xsltproc wget unzip python3 jq zstd axel coreutils openssl rhash
         sudo apt-get install -y libncursesw5-dev zlib1g-dev genisoimage xsltproc rsync wget unzip dnsmasq stunnel4 net-tools resolvconf python3 python3-pip python3-venv iptables-persistent net-tools
-
-
 
     - name: 🗺️ Determine Target Architecture
       id: target
@@ -113,6 +114,7 @@ jobs:
         echo "::notice::Target for $DEVICE: $TARGET"
 
     - name: ⬇️ Download ImageBuilder (with axel)
+      id: download
       run: |
         SANITIZED_TARGET="${{ steps.target.outputs.sanitized_target }}"
         VERSION="${{ matrix.version }}"
@@ -133,23 +135,35 @@ jobs:
           if wget -q --spider "$URL"; then
             echo "✅ Found valid ImageBuilder at: $URL"
             # 使用axel加速下载（64线程）
+            echo "🚀 Downloading with axel (64 threads)..."
             axel -n 64 -o imagebuilder.tar.zst "$URL"
-            if [ $? -eq 0 ]; then
-              echo "🚀 Downloaded with axel successfully"
+
+            # 检查axel下载是否成功且文件完整
+            if [ $? -eq 0 ] && [ -f "imagebuilder.tar.zst" ] && [ $(stat -c%s "imagebuilder.tar.zst") -gt 1000000 ]; then
+              echo "✅ Axel download completed and file size seems valid"
               FOUND=1
               break
             else
-              echo "⚠️ Axel download failed, trying with wget..."
+              echo "⚠️ Axel download may have failed or file is too small, checking file..."
+              if [ -f "imagebuilder.tar.zst" ]; then
+                echo "📊 File size: $(stat -c%s "imagebuilder.tar.zst") bytes"
+              fi
+              echo "🔄 Trying with wget as fallback..."
               wget -O imagebuilder.tar.zst "$URL" && {
-                FOUND=1
-                break
+                if [ -f "imagebuilder.tar.zst" ] && [ $(stat -c%s "imagebuilder.tar.zst") -gt 1000000 ]; then
+                  echo "✅ Wget download completed successfully"
+                  FOUND=1
+                  break
+                else
+                  echo "⚠️ Wget download also failed or file too small"
+                fi
               }
             fi
           fi
         done
 
         if [ "$FOUND" -eq 0 ]; then
-          echo "::error::ImageBuilder not found at any URL"
+          echo "::error::ImageBuilder not found or download failed at any URL"
           for URL in "${URLS[@]}"; do
             echo "::error::Tried: $URL"
           done
@@ -158,15 +172,35 @@ jobs:
 
     - name: 📦 Extract ImageBuilder
       run: |
+        echo "🔍 Checking downloaded file..."
+        if [ ! -f "imagebuilder.tar.zst" ]; then
+          echo "::error::ImageBuilder archive not found!"
+          exit 1
+        fi
+
+        FILESIZE=$(stat -c%s "imagebuilder.tar.zst")
+        echo "📊 Archive size: $FILESIZE bytes"
+
+        if [ "$FILESIZE" -lt 1000000 ]; then
+          echo "::error::Archive file is too small (可能下载中断)"
+          exit 1
+        fi
+
         if file imagebuilder.tar.zst | grep -q "Zstandard"; then
           echo "🔧 Extracting Zstandard archive"
           tar -I zstd -xf imagebuilder.tar.zst
         elif file imagebuilder.tar.zst | grep -q "XZ"; then
           echo "🔧 Extracting XZ archive"
           tar -xJf imagebuilder.tar.zst
+        elif file imagebuilder.tar.zst | grep -q "gzip"; then
+          echo "🔧 Extracting gzip archive"
+          tar -xzf imagebuilder.tar.zst
         else
-          echo "::error::Unknown archive format"
-          exit 1
+          echo "⚠️ Unknown archive format, trying general extraction..."
+          tar -xf imagebuilder.tar.zst || {
+            echo "::error::Failed to extract archive"
+            exit 1
+          }
         fi
 
         mv immortalwrt-imagebuilder-* imagebuilder
@@ -284,9 +318,59 @@ jobs:
 
         echo "✅ Build completed successfully in parallel mode"
 
-    - name: 🔢 Calculate Hashes
+    - name: 🔄 Rename Firmware Files
+      id: rename-firmware
       run: |
         cd imagebuilder/bin/targets
+
+        # 获取格式化日期
+        FORMATTED_DATE="${{ steps.get-date.outputs.formatted_date }}"
+        echo "📅 Using formatted date for renaming: $FORMATTED_DATE"
+
+        # 查找所有固件文件
+        find . -type f \( -name "*.bin" -o -name "*.img" -o -name "*.itb" -o -name "*.fip" -o -name "*.gz" -o -name "*.trx" \) | while read -r file; do
+          # 获取文件所在目录和文件名
+          dir=$(dirname "$file")
+          filename=$(basename "$file")
+
+          echo "📄 Original filename: $filename"
+
+          # 分析文件名结构并插入日期
+          # 原始格式: immortalwrt-24.10.4-mediatek-filogic-glinet_gl-mt3000-squashfs-sysupgrade.bin
+          # 新格式: immortalwrt-24.10.4-20250117204610-mediatek-filogic-glinet_gl-mt3000-squashfs-sysupgrade.bin
+
+          if [[ "$filename" =~ ^(immortalwrt-[0-9]+\.[0-9]+\.[0-9]+)-([a-zA-Z0-9_-]+)$ ]]; then
+            # 匹配类似: immortalwrt-24.10.4-mediatek-filogic-glinet_gl-mt3000-squashfs-sysupgrade.bin
+            prefix="${BASH_REMATCH[1]}"
+            suffix="${BASH_REMATCH[2]}"
+            new_filename="${prefix}-${FORMATTED_DATE}-${suffix}"
+          elif [[ "$filename" =~ ^(immortalwrt-[0-9]+\.[0-9]+\.[0-9]+-)[a-zA-Z0-9_-]+\.(bin|img|itb|fip|gz|trx)$ ]]; then
+            # 匹配其他格式，直接插入日期
+            base_name="${filename%.*}"
+            extension="${filename##*.}"
+            new_filename="${base_name}-${FORMATTED_DATE}.${extension}"
+          else
+            # 如果无法匹配模式，添加日期后缀
+            base_name="${filename%.*}"
+            extension="${filename##*.}"
+            new_filename="${base_name}-${FORMATTED_DATE}.${extension}"
+          fi
+
+          # 重命名文件
+          echo "🔄 Renaming: $filename -> $new_filename"
+          mv "$file" "$dir/$new_filename"
+        done
+
+        echo "✅ Firmware files renamed with date: $FORMATTED_DATE"
+
+    - name: 🔢 Calculate Hashes
+      id: calculate-hashes
+      run: |
+        cd imagebuilder/bin/targets
+
+        # 创建SHA256摘要文件
+        SHA256_FILE="sha256sums.txt"
+        > "$SHA256_FILE"
 
         # 查找所有固件文件
         find . -type f \( -name "*.bin" -o -name "*.img" -o -name "*.itb" -o -name "*.fip" -o -name "*.gz" -o -name "*.trx" \) | while read -r file; do
@@ -296,27 +380,39 @@ jobs:
           filename=$(basename "$file")
 
           # 计算各种哈希值
-          echo "🔐 SHA256: $(sha256sum "$file" | awk '{print $1}')" > "$file.hashes"
-          echo "🔐 SHA512: $(sha512sum "$file" | awk '{print $1}')" >> "$file.hashes"
-          echo "🔐 BLAKE2: $(b2sum "$file" | awk '{print $1}')" >> "$file.hashes"
+          SHA256=$(sha256sum "$file" | awk '{print $1}')
+          SHA512=$(sha512sum "$file" | awk '{print $1}')
+          MD5=$(md5sum "$file" | awk '{print $1}')
 
-          # 国密 SM3
+          # 保存到SHA256摘要文件
+          echo "$SHA256  $filename" >> "$SHA256_FILE"
+
+          # 创建详细的哈希文件
+          echo "🔐 SHA256: $SHA256" > "$file.hashes"
+          echo "🔐 SHA512: $SHA512" >> "$file.hashes"
+          echo "🔐 MD5: $MD5" >> "$file.hashes"
+
+          # 可选的其他哈希
+          echo "🔐 BLAKE2: $(b2sum "$file" | awk '{print $1}')" >> "$file.hashes"
+          echo "🔐 SHA1: $(sha1sum "$file" | awk '{print $1}')" >> "$file.hashes"
+
+          # 国密 SM3 (如果可用)
           if openssl list -digest-commands | grep -q sm3; then
             echo "🔐 SM3: $(openssl sm3 -r "$file" | awk '{print $1}')" >> "$file.hashes"
-          else
-            echo "⚠️ OpenSSL SM3 not available, skipping"
           fi
 
-          # 其他哈希算法
-          echo "🔐 MD5: $(md5sum "$file" | awk '{print $1}')" >> "$file.hashes"
-          echo "🔐 SHA1: $(sha1sum "$file" | awk '{print $1}')" >> "$file.hashes"
-          echo "🔐 SHA3-256: $(rhash --sha3-256 "$file" | awk '{print $1}')" >> "$file.hashes"
-
           echo "📝 Hashes saved to $file.hashes"
-          echo "----------------------------------------"
-          cat "$file.hashes"
-          echo "----------------------------------------"
         done
+
+        # 输出SHA256摘要
+        echo "📋 SHA256 Digests:"
+        cat "$SHA256_FILE"
+
+        # 将SHA256摘要保存到环境变量供发布步骤使用
+        SHA256_CONTENT=$(cat "$SHA256_FILE")
+        echo "sha256_content<<EOF" >> $GITHUB_OUTPUT
+        echo "$SHA256_CONTENT" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
 
     - name: 🗜️ Archive Artifacts
       run: |
@@ -328,7 +424,7 @@ jobs:
 
         # 使用绝对路径查找固件文件和哈希文件
         echo "🔍 Searching for firmware files in imagebuilder/bin/targets..."
-        FIRMWARE_FILES=$(find imagebuilder/bin/targets -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" -o -name "*.trx" -o -name "*.itb" -o -name "*.fip" -o -name "*.hashes" \) 2>/dev/null)
+        FIRMWARE_FILES=$(find imagebuilder/bin/targets -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" -o -name "*.trx" -o -name "*.itb" -o -name "*.fip" -o -name "*.hashes" -o -name "sha256sums.txt" \) 2>/dev/null)
 
         if [ -n "$FIRMWARE_FILES" ]; then
           echo "✅ Found files:"
@@ -367,21 +463,37 @@ jobs:
         name: "Build ${{ github.run_number }} (${{ matrix.device }})"
         body: |
           ### 🚀 ImmortalWrt Firmware Build
-          **Device**: ${{ matrix.device }}
-          **Version**: ${{ matrix.version }}
-          **Build ID**: ${{ github.run_id }}
-          **Build Date (CST)**: ${{ steps.get-date.outputs.date }}
 
-          ### 🔐 Hash Algorithms Included:
-          - SHA256
+          **Device**: `${{ matrix.device }}`
+          **Version**: `${{ matrix.version }}`
+          **Build ID**: `${{ github.run_id }}`
+          **Build Date (CST)**: `${{ steps.get-date.outputs.date }}`
+          **Date Tag**: `${{ steps.get-date.outputs.formatted_date }}`
+
+          ### 📦 Files Included:
+          - Firmware files with date tag: `${{ steps.get-date.outputs.formatted_date }}`
+          - SHA256 hash verification file: `sha256sums.txt`
+          - Detailed hash files (`.hashes`) for each firmware
+
+          ### 🔐 SHA256 Checksums:
+          ```
+          ${{ steps.calculate-hashes.outputs.sha256_content }}
+          ```
+
+          ### 📝 Other Hash Algorithms:
+          Each firmware file has a corresponding `.hashes` file containing:
           - SHA512
-          - BLAKE2
-          - SM3 (国密)
           - MD5
+          - BLAKE2
           - SHA1
-          - SHA3-256
+          - SM3 (国密，如果可用)
 
-          🔧 Built with GitHub Actions at ${{ steps.get-date.outputs.date }} (CST)
+          Download the `.hashes` files for complete verification.
+
+          ---
+          🔧 Built with GitHub Actions at `${{ steps.get-date.outputs.date }}` (CST)
+
+          📅 Date format in filenames: `${{ steps.get-date.outputs.formatted_date }}` (YYYYMMDDHHMMSS)
         draft: false
         prerelease: false
       env:
