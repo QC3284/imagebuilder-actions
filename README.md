@@ -64,17 +64,18 @@ By default, GitHub Actions may be disabled for a forked repository. Go to your f
 All customization is done by modifying files in the `config/` directory.
 
 1.  **Select Target Devices (`config/devices.json`)**
+    *   Please note that this project supports a very limited range of devices.
     *   Open the `config/devices.json` file.
     *   This is a JSON array containing the identifiers of all devices for which firmware needs to be built.
     *   You can remove devices you don't need or add new ones following the existing format.
     *   **Important:** The device identifier you add must be a `PROFILE` name supported by the ImmortalWrt ImageBuilder. You can find some example mappings in the `Determine Target Architecture` step of the workflow, or get them from the official ImmortalWrt documentation.
 
-2.  **Specify ImmortalWrt Version (`config/version.json`)**
+3.  **Specify ImmortalWrt Version (`config/version.json`)**
     *   Open the `config/version.json` file.
     *   Modify the `version` field to the ImmortalWrt version you wish to build (e.g., `"23.05.2"`).
     *   Make sure the version you enter has a corresponding ImageBuilder on the [ImmortalWrt official release page](https://immortalwrt.kyarucloud.moe/releases/).
 
-3.  **Manage Packages (`config/packages_*.txt` and `zdy_pkg/`)**
+4.  **Manage Packages (`config/packages_*.txt` and `zdy_pkg/`)**
     *   **Device-Specific Packages:**
         *   To customize packages for a specific device, create a file named `config/packages_<device_identifier>.txt` (e.g., `config/packages_glinet_gl-mt3000.txt`).
         *   In this file, list one package name you want to include per line.
@@ -154,17 +155,18 @@ You have several ways to trigger a firmware build:
 所有的定制化操作都通过修改 `config/` 目录下的文件来完成。
 
 1.  **选择目标设备 (`config/devices.json`)**
+    *   注意，该项目支持的设备非常有限
     *   打开 `config/devices.json` 文件。
     *   这是一个 JSON 数组，包含了所有需要构建固件的设备标识符。
     *   您可以根据您的需求，删除您不需要的设备，或者参照已有格式添加新的设备。
     *   **重要:** 您添加的设备标识符必须是 ImmortalWrt ImageBuilder 支持的 `PROFILE` 名称。您可以在工作流的 `Determine Target Architecture` 步骤中找到一些示例映射，或者从 ImmortalWrt 官方获取。
 
-2.  **指定 ImmortalWrt 版本 (`config/version.json`)**
+3.  **指定 ImmortalWrt 版本 (`config/version.json`)**
     *   打开 `config/version.json` 文件。
     *   修改 `version` 字段为您希望构建的 ImmortalWrt 版本号（例如 `"23.05.2"`）。
     *   请确保您填写的版本在 [ImmortalWrt 官方发布页面](https://immortalwrt.kyarucloud.moe/releases/) 上存在对应的 ImageBuilder。
 
-3.  **管理软件包 (`config/packages_*.txt` 和 `zdy_pkg/`)**
+4.  **管理软件包 (`config/packages_*.txt` 和 `zdy_pkg/`)**
     *   **设备专属软件包:**
         *   要为特定设备定制软件包，请创建一个名为 `config/packages_<device_identifier>.txt` 的文件（例如 `config/packages_glinet_gl-mt3000.txt`）。
         *   在此文件中，每行列出一个您想要包含的软件包名称。
@@ -202,3 +204,4 @@ You have several ways to trigger a firmware build:
     *   进入您仓库的 **Releases** 页面（通常在首页右侧栏）。
     *   您会看到类似 `build-<run_id>-<device_name>` 的新版本。
     *   点击该版本，在 **Assets** 部分，您就可以找到所有生成的固件文件 (`.bin`, `.img` 等)、`sha256sums.txt` 校验文件以及每个固件的详细 `.hashes` 文件。
+
