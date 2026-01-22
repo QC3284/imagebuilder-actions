@@ -60,11 +60,11 @@ Click the **Fork** button in the upper right corner of this page to copy this re
 By default, GitHub Actions may be disabled for a forked repository. Go to your forked repository's page, click the **Actions** tab, and if prompted, click the **"I understand my workflows, go ahead and enable them"** button to enable it.
 
 #### Step 3: Customize Your Firmware
+####  Please note that this project supports a very limited range of devices.
 
 All customization is done by modifying files in the `config/` directory.
 
 1.  **Select Target Devices (`config/devices.json`)**
-    *   Please note that this project supports a very limited range of devices.
     *   Open the `config/devices.json` file.
     *   This is a JSON array containing the identifiers of all devices for which firmware needs to be built.
     *   You can remove devices you don't need or add new ones following the existing format.
@@ -151,11 +151,10 @@ You have several ways to trigger a firmware build:
 默认情况下，Fork 后的仓库的 GitHub Actions 可能是禁用的。请进入您 Fork 后的仓库页面，点击 **Actions** 标签页，如果看到提示，请点击 **"I understand my workflows, go ahead and enable them"** 按钮来启用它。
 
 #### 步骤 3: 定制您的固件
-
+#### 注意，该项目支持的设备非常有限
 所有的定制化操作都通过修改 `config/` 目录下的文件来完成。
 
 1.  **选择目标设备 (`config/devices.json`)**
-    *   注意，该项目支持的设备非常有限
     *   打开 `config/devices.json` 文件。
     *   这是一个 JSON 数组，包含了所有需要构建固件的设备标识符。
     *   您可以根据您的需求，删除您不需要的设备，或者参照已有格式添加新的设备。
@@ -204,4 +203,5 @@ You have several ways to trigger a firmware build:
     *   进入您仓库的 **Releases** 页面（通常在首页右侧栏）。
     *   您会看到类似 `build-<run_id>-<device_name>` 的新版本。
     *   点击该版本，在 **Assets** 部分，您就可以找到所有生成的固件文件 (`.bin`, `.img` 等)、`sha256sums.txt` 校验文件以及每个固件的详细 `.hashes` 文件。
+
 
