@@ -1,0 +1,14 @@
+{
+  "glinet_gl-mt3000": "mediatek/filogic",
+  "glinet_gl-mt2500": "mediatek/filogic",
+  "glinet_gl-mt6000": "mediatek/filogic",
+  "konka_komi-a31": "mediatek/filogic",
+  "xiaomi_redmi-router-ax6000": "mediatek/filogic",
+  "xiaomi_mi-router-3g": "ramips/mt7621",
+  "xiaomi_mi-router-cr6606": "ramips/mt7621",
+  "xiaomi_mi-router-cr6608": "ramips/mt7621",
+  "xiaomi_mi-router-cr6609": "ramips/mt7621",
+  "netgear_r7800": "ipq806x/generic",
+  "linksys_wrt3200acm": "mvebu/cortexa9",
+  "tplink_archer-c7-v5": "ath79/generic"
+}
