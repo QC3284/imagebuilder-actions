@@ -17,7 +17,7 @@ ImmortalWrt AutoBuilder 是一个自动化的固件构建系统，用于定期�
 - **自动发布**: 构建完成后自动发布到 GitHub Releases
 
 ### 📁 目录结构
-
+```
 ├── config/
 │   ├── devices.json          # 设备列表配置
 │   ├── version.json          # 版本信息配置  
@@ -27,6 +27,7 @@ ImmortalWrt AutoBuilder 是一个自动化的固件构建系统，用于定期�
 ├── zdy_fk_pkg/               # 分控自定义软件包目录
 └── zdy_rjb.txt               # 主自定义包设备列表
 └── zdy_rjb_fk.txt            # 分控自定义包设备列表
+```
 
 ### ⚙️ 配置文件说明
 
