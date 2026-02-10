@@ -1,6 +1,6 @@
-```# 🔧 ImmortalWrt AutoBuilder
+# 🔧 ImmortalWrt AutoBuilder
 
-[![Build Status](https://github.com/your-repo/immortalwrt-autobuilder/workflows/%F0%9F%94%A7%20ImmortalWrt%20AutoBuilder/badge.svg)](https://github.com/your-repo/immortalwrt-autobuilder/actions)
+[![Build Status](https://github.com/QC3284/immortalwrt-autobuilder/workflows/%F0%9F%94%A7%20ImmortalWrt%20AutoBuilder/badge.svg)](https://github.com/your-repo/immortalwrt-autobuilder/actions)
 
 ## 🇨🇳 中文说明
 
@@ -27,7 +27,6 @@ ImmortalWrt AutoBuilder 是一个自动化的固件构建系统，用于定期�
 ├── zdy_fk_pkg/               # 分控自定义软件包目录
 └── zdy_rjb.txt               # 主自定义包设备列表
 └── zdy_rjb_fk.txt            # 分控自定义包设备列表
-```
 
 ### ⚙️ 配置文件说明
 
