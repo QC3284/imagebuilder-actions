@@ -144,7 +144,3 @@ One package name per line, supports comments (starting with #)
 - GitHub repository with proper configuration files
 - GitHub Secrets configured (if needed for publishing)
 - Access to ImmortalWrt release servers
-
-### 📝 License
-This project is licensed under the MIT License - see the LICENSE file for details.
-``````
