@@ -23,39 +23,15 @@ jobs:
 
     - name: 🔍 Validate Config Files
       run: |
-        echo "::group::Validating configuration files"
-        CONFIG_FILES=(
-          "config/devices.json"
-          "config/version.json"
-          "config/device_targets.json"
-        )
-        
-        MISSING_FILES=()
-        for file in "${CONFIG_FILES[@]}"; do
-          if [ ! -f "$file" ]; then
-            MISSING_FILES+=("$file")
-          fi
-        done
-        
-        if [ ${#MISSING_FILES[@]} -ne 0 ]; then
-          echo "::error::Missing required config files: ${MISSING_FILES[*]}"
+        if [ ! -f "config/devices.json" ] || [ ! -f "config/version.json" ] || [ ! -f "config/device_targets.json" ]; then
+          echo "::error::Missing config files!"
           exit 1
         fi
-        
-        # 验证JSON格式
-        for file in "${CONFIG_FILES[@]}"; do
-          if ! jq empty "$file" 2>/dev/null; then
-            echo "::error::Invalid JSON in $file"
-            exit 1
-          fi
-        done
         echo "Config files validation passed ✅"
-        echo "::endgroup::"
 
     - name: 📋 Read Configuration
       id: set-matrix
       run: |
-        echo "::group::Reading configuration data"
         if jq -e '.devices' config/devices.json >/dev/null 2>&1; then
           DEVICES=$(jq -r '.devices[]' config/devices.json)
         else
@@ -76,7 +52,6 @@ jobs:
 
         echo "matrix=$MATRIX_JSON" >> $GITHUB_OUTPUT
         echo "::notice::Build matrix generated for $VERSION: $MATRIX_JSON"
-        echo "::endgroup::"
 
   build-firmware:
     name: 🔨 Build ${{ matrix.device }}
@@ -93,55 +68,47 @@ jobs:
     - name: 📅 Get Build Date (CST)
       id: get-date
       run: |
-        echo "::group::Getting build date"
         TZ='Asia/Shanghai'
         build_date=$(TZ=$TZ date +'%Y-%m-%d %H:%M:%S %Z')
         formatted_date=$(TZ=$TZ date +'%Y%m%d%H%M%S')
-        timestamp=$(TZ=$TZ date +%s)
         echo "date=$build_date" >> $GITHUB_OUTPUT
         echo "formatted_date=$formatted_date" >> $GITHUB_OUTPUT
-        echo "timestamp=$timestamp" >> $GITHUB_OUTPUT
+        echo "timestamp=$(TZ=$TZ date +%s)" >> $GITHUB_OUTPUT
         echo "::notice::Build date: $formatted_date"
-        echo "::endgroup::"
 
     - name: 🔧 Setup Build Environment
       run: |
-        echo "::group::Setting up build environment"
         sudo apt-get update -y
         sudo apt-get install -y build-essential libncurses5-dev zlib1g-dev gawk git gettext libssl-dev xsltproc wget unzip python3 jq zstd axel coreutils openssl rhash
         sudo apt-get install -y libncursesw5-dev zlib1g-dev genisoimage xsltproc rsync wget unzip dnsmasq stunnel4 net-tools resolvconf python3 python3-pip python3-venv iptables-persistent net-tools
-        echo "::endgroup::"
 
-    - name: 🗺️ Read Device Target Mapping from Config
+    - name: 🗺️ Determine Target Architecture
       id: target
       run: |
-        echo "::group::Reading device target mapping"
         DEVICE="${{ matrix.device }}"
-        
-        # 从配置文件读取设备映射
+
+         # 从配置文件读取设备映射
         if [ -f "config/device_targets.json" ]; then
           TARGET=$(jq -r --arg device "$DEVICE" '.[$device]' config/device_targets.json 2>/dev/null)
-          
+
           if [ "$TARGET" = "null" ] || [ -z "$TARGET" ]; then
-            echo "::error::Device $DEVICE not found in config/device_targets.json"
-            echo "::error::Available devices in config:"
-            jq -r 'keys[]' config/device_targets.json
-            exit 1
-          fi
-        else
-          echo "::error::config/device_targets.json not found!"
-          exit 1
-        fi
+             echo "::error::Device $DEVICE not found in config/device_targets.json"
+             echo "::error::Available devices in config:"
+             jq -r 'keys[]' config/device_targets.json
+             exit 1
+           fi
+         else
+           echo "::error::config/device_targets.json not found!"
+           exit 1
+         fi
 
         echo "target=$TARGET" >> $GITHUB_OUTPUT
         echo "sanitized_target=${TARGET//\//-}" >> $GITHUB_OUTPUT
         echo "::notice::Target for $DEVICE: $TARGET"
-        echo "::endgroup::"
 
     - name: ⬇️ Download ImageBuilder (with axel)
       id: download
       run: |
-        echo "::group::Downloading ImageBuilder"
         SANITIZED_TARGET="${{ steps.target.outputs.sanitized_target }}"
         VERSION="${{ matrix.version }}"
 
@@ -195,11 +162,9 @@ jobs:
           done
           exit 1
         fi
-        echo "::endgroup::"
 
     - name: 📦 Extract ImageBuilder
       run: |
-        echo "::group::Extracting ImageBuilder"
         echo "🔍 Checking downloaded file..."
         if [ ! -f "imagebuilder.tar.zst" ]; then
           echo "::error::ImageBuilder archive not found!"
@@ -233,13 +198,11 @@ jobs:
 
         mv immortalwrt-imagebuilder-* imagebuilder
         echo "✅ ImageBuilder extracted successfully"
-        echo "::endgroup::"
 
     # ===== 新增的自定义软件包复制步骤 =====
     - name: 📥 Copy Custom Packages
       id: custom-pkgs
       run: |
-        echo "::group::Copying custom packages"
         echo "🔍 Checking for custom package configuration..."
         PKG_DIR="$GITHUB_WORKSPACE/imagebuilder/packages"
         mkdir -p "$PKG_DIR"
@@ -292,13 +255,11 @@ jobs:
           echo "::notice::No custom packages added"
           echo "has_custom_pkgs=false" >> $GITHUB_OUTPUT
         fi
-        echo "::endgroup::"
     # ===== 新增步骤结束 =====
 
     - name: 📦 Prepare Packages
       id: packages
       run: |
-        echo "::group::Preparing packages"
         CUSTOM_PKG_FILE="config/packages_${{ matrix.device }}.txt"
         DEFAULT_PKG_FILE="config/default_packages.txt"
 
@@ -320,11 +281,9 @@ jobs:
 
         echo "📦 Packages to install: $FULL_PKGS"
         echo "PACKAGES=$FULL_PKGS" >> $GITHUB_ENV
-        echo "::endgroup::"
 
     - name: 🔨 Build Firmware
       run: |
-        echo "::group::Building firmware"
         cd imagebuilder
         echo "🚀 Building firmware for ${{ matrix.device }} with packages: $PACKAGES"
 
@@ -351,12 +310,10 @@ jobs:
         fi
 
         echo "✅ Build completed successfully in parallel mode"
-        echo "::endgroup::"
 
     - name: 🔄 Rename Firmware Files
       id: rename-firmware
       run: |
-        echo "::group::Renaming firmware files"
         cd imagebuilder/bin/targets
 
         # 获取格式化日期
@@ -398,12 +355,10 @@ jobs:
         done
 
         echo "✅ Firmware files renamed with date: $FORMATTED_DATE"
-        echo "::endgroup::"
 
     - name: 🔢 Calculate Hashes
       id: calculate-hashes
       run: |
-        echo "::group::Calculating hashes"
         cd imagebuilder/bin/targets
 
         # 创建SHA256摘要文件
@@ -435,7 +390,7 @@ jobs:
           echo "🔐 SHA1: $(sha1sum "$file" | awk '{print $1}')" >> "$file.hashes"
 
           # 国密 SM3 (如果可用)
-          if command -v openssl &> /dev/null && openssl list -digest-commands 2>/dev/null | grep -q sm3; then
+          if openssl list -digest-commands | grep -q sm3; then
             echo "🔐 SM3: $(openssl sm3 -r "$file" | awk '{print $1}')" >> "$file.hashes"
           fi
 
@@ -451,11 +406,9 @@ jobs:
         echo "sha256_content<<EOF" >> $GITHUB_OUTPUT
         echo "$SHA256_CONTENT" >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
-        echo "::endgroup::"
 
     - name: 🗜️ Archive Artifacts
       run: |
-        echo "::group::Archiving artifacts"
         # 确保在正确的工作目录
         cd "$GITHUB_WORKSPACE"
 
@@ -494,7 +447,6 @@ jobs:
 
         echo "DEVICE=${{ matrix.device }}" >> $GITHUB_ENV
         echo "ARTIFACT_DIR=artifacts/${{ matrix.device }}" >> $GITHUB_ENV
-        echo "::endgroup::"
 
     - name: 🚀 Upload Release
       uses: softprops/action-gh-release@v2
@@ -518,7 +470,7 @@ jobs:
 
           ### 🔐 SHA256 Checksums:
           ```
-           $ {{ steps.calculate-hashes.outputs.sha256_content }}
+          ${{ steps.calculate-hashes.outputs.sha256_content }}
           ```
 
           ### 📝 Other Hash Algorithms:
