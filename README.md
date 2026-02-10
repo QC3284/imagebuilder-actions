@@ -1,6 +1,6 @@
 # 🔧 ImmortalWrt AutoBuilder
 
-[![Build Status](https://github.com/QC3284/immortalwrt-autobuilder/workflows/%F0%9F%94%A7%20ImmortalWrt%20AutoBuilder/badge.svg)](https://github.com/your-repo/immortalwrt-autobuilder/actions)
+[![Build Status](https://github.com/QC3284/imagebuilder-actions/workflows/%F0%9F%94%A7%20ImmortalWrt%20AutoBuilder/badge.svg)](https://github.com/QCC3284/imagebuilder-actions/actions)
 
 ## 🇨🇳 中文说明
 
