@@ -138,8 +138,54 @@ jobs:
         echo "::notice::Target for $DEVICE: $TARGET"
         echo "::endgroup::"
 
+    - name: ⬇️ Check for Cached ImageBuilder
+     id: check-cache
+     run: |
+        echo "::group::Checking for cached ImageBuilder"
+        SANITIZED_TARGET="${{ steps.target.outputs.sanitized_target }}"
+        VERSION="${{ matrix.version }}"
+
+        # 构建期望的文件名
+        EXPECTED_FILE_ZST="immortalwrt-imagebuilder-$VERSION-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
+        EXPECTED_FILE_XZ="immortalwrt-imagebuilder-$VERSION-$SANITIZED_TARGET.Linux-x86_64.tar.xz"
+        EXPECTED_FILE_GENERIC_ZST="immortalwrt-imagebuilder-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
+        EXPECTED_FILE_GENERIC_XZ="immortalwrt-imagebuilder-$SANITIZED_TARGET.Linux-x86_64.tar.xz"
+
+        CACHED_FILE=""
+        if [ -f "immortalwrt_imagebuilder/$EXPECTED_FILE_ZST" ]; then
+          CACHED_FILE="immortalwrt_imagebuilder/$EXPECTED_FILE_ZST"
+          echo "::notice::Found cached ImageBuilder: $EXPECTED_FILE_ZST"
+        elif [ -f "immortalwrt_imagebuilder/$EXPECTED_FILE_XZ" ]; then
+          CACHED_FILE="immortalwrt_imagebuilder/$EXPECTED_FILE_XZ"
+          echo "::notice::Found cached ImageBuilder: $EXPECTED_FILE_XZ"
+        elif [ -f "immortalwrt_imagebuilder/$EXPECTED_FILE_GENERIC_ZST" ]; then
+          CACHED_FILE="immortalwrt_imagebuilder/$EXPECTED_FILE_GENERIC_ZST"
+          echo "::notice::Found cached ImageBuilder: $EXPECTED_FILE_GENERIC_ZST"
+        elif [ -f "immortalwrt_imagebuilder/$EXPECTED_FILE_GENERIC_XZ" ]; then
+          CACHED_FILE="immortalwrt_imagebuilder/$EXPECTED_FILE_GENERIC_XZ"
+         echo "::notice::Found cached ImageBuilder: $EXPECTED_FILE_GENERIC_XZ"
+       fi
+
+       if [ -n "$CACHED_FILE" ]; then
+         # 验证缓存文件大小
+         FILE_SIZE=$(stat -c%s "$CACHED_FILE")
+       if [ "$FILE_SIZE" -gt 1000000 ]; then
+          echo "::notice::Cache file is valid (size: $FILE_SIZE bytes), using cached file"
+          echo "use_cache=true" >> $GITHUB_OUTPUT
+          echo "cached_file=$CACHED_FILE" >> $GITHUB_OUTPUT
+       else
+          echo "::warning::Cached file is too small, will download fresh copy"
+          echo "use_cache=false" >> $GITHUB_OUTPUT
+       fi
+       else
+          echo "::notice::No cached ImageBuilder found, will download"
+          echo "use_cache=false" >> $GITHUB_OUTPUT
+       fi
+          echo "::endgroup::"
+
     - name: ⬇️ Download ImageBuilder (with axel)
       id: download
+      if: steps.check-cache.outputs.use_cache == 'false'
       run: |
         echo "::group::Downloading ImageBuilder"
         SANITIZED_TARGET="${{ steps.target.outputs.sanitized_target }}"
@@ -162,21 +208,21 @@ jobs:
             echo "✅ Found valid ImageBuilder at: $URL"
             # 使用axel加速下载（64线程）
             echo "🚀 Downloading with axel (64 threads)..."
-            axel -n 64 -o imagebuilder.tar.zst "$URL"
+            axel -n 64 -o immortalwrt_imagebuilder/imagebuilder.tar.zst "$URL"
 
             # 检查axel下载是否成功且文件完整
-            if [ $? -eq 0 ] && [ -f "imagebuilder.tar.zst" ] && [ $(stat -c%s "imagebuilder.tar.zst") -gt 1000000 ]; then
+            if [ $? -eq 0 ] && [ -f "immortalwrt_imagebuilder/imagebuilder.tar.zst" ] && [ $(stat -c%s "immortalwrt_imagebuilder/imagebuilder.tar.zst") -gt 1000000 ]; then
               echo "✅ Axel download completed and file size seems valid"
               FOUND=1
               break
             else
               echo "⚠️ Axel download may have failed or file is too small, checking file..."
-              if [ -f "imagebuilder.tar.zst" ]; then
-                echo "📊 File size: $(stat -c%s "imagebuilder.tar.zst") bytes"
+              if [ -f "immortalwrt_imagebuilder/imagebuilder.tar.zst" ]; then
+                echo "📊 File size: $(stat -c%s "immortalwrt_imagebuilder/imagebuilder.tar.zst") bytes"
               fi
               echo "🔄 Trying with wget as fallback..."
-              wget -O imagebuilder.tar.zst "$URL" && {
-                if [ -f "imagebuilder.tar.zst" ] && [ $(stat -c%s "imagebuilder.tar.zst") -gt 1000000 ]; then
+              wget -O immortalwrt_imagebuilder/imagebuilder.tar.zst "$URL" && {
+                if [ -f "immortalwrt_imagebuilder/imagebuilder.tar.zst" ] && [ $(stat -c%s "immortalwrt_imagebuilder/imagebuilder.tar.zst") -gt 1000000 ]; then
                   echo "✅ Wget download completed successfully"
                   FOUND=1
                   break
@@ -197,43 +243,62 @@ jobs:
         fi
         echo "::endgroup::"
 
-    - name: 📦 Extract ImageBuilder
+    - name: 📋 Set Downloaded File Path
+      id: set-file-path
       run: |
-        echo "::group::Extracting ImageBuilder"
-        echo "🔍 Checking downloaded file..."
-        if [ ! -f "imagebuilder.tar.zst" ]; then
-          echo "::error::ImageBuilder archive not found!"
-          exit 1
-        fi
-
-        FILESIZE=$(stat -c%s "imagebuilder.tar.zst")
-        echo "📊 Archive size: $FILESIZE bytes"
-
-        if [ "$FILESIZE" -lt 1000000 ]; then
-          echo "::error::Archive file is too small (可能下载中断)"
-          exit 1
-        fi
-
-        if file imagebuilder.tar.zst | grep -q "Zstandard"; then
-          echo "🔧 Extracting Zstandard archive"
-          tar -I zstd -xf imagebuilder.tar.zst
-        elif file imagebuilder.tar.zst | grep -q "XZ"; then
-          echo "🔧 Extracting XZ archive"
-          tar -xJf imagebuilder.tar.zst
-        elif file imagebuilder.tar.zst | grep -q "gzip"; then
-          echo "🔧 Extracting gzip archive"
-          tar -xzf imagebuilder.tar.zst
+        if [ "${{ steps.check-cache.outputs.use_cache }}" = "true" ]; then
+          echo "downloaded_file=${{ steps.check-cache.outputs.cached_file }}" >> $GITHUB_OUTPUT
         else
-          echo "⚠️ Unknown archive format, trying general extraction..."
-          tar -xf imagebuilder.tar.zst || {
-            echo "::error::Failed to extract archive"
-            exit 1
-          }
+          echo "downloaded_file=immortalwrt_imagebuilder/imagebuilder.tar.zst" >> $GITHUB_OUTPUT
         fi
 
-        mv immortalwrt-imagebuilder-* imagebuilder
-        echo "✅ ImageBuilder extracted successfully"
-        echo "::endgroup::"
+   - name: 📦 Extract ImageBuilder
+     run: |
+       echo "::group::Extracting ImageBuilder"
+       DOWNLOADED_FILE="${{ steps.set-file-path.outputs.downloaded_file }}"
+       echo "🔍 Using file: $DOWNLOADED_FILE"
+
+       if [ ! -f "$DOWNLOADED_FILE" ]; then
+         echo "::error::Downloaded ImageBuilder archive not found at $DOWNLOADED_FILE!"
+         ls -la immortalwrt_imagebuilder/ || true
+         exit 1
+       fi
+
+       FILESIZE=$(stat -c%s "$DOWNLOADED_FILE")
+       echo "📊 Archive size: $FILESIZE bytes"
+
+       if [ "$FILESIZE" -lt 1000000 ]; then
+         echo "::error::Archive file is too small (可能下载中断)"
+         exit 1
+       fi
+
+       # 创建临时目录进行解压
+       mkdir -p temp_extract
+       cd temp_extract
+
+       if file "$OLDPWD/$DOWNLOADED_FILE" | grep -q "Zstandard"; then
+         echo "🔧 Extracting Zstandard archive"
+         tar -I zstd -xf "$OLDPWD/$DOWNLOADED_FILE"
+       elif file "$OLDPWD/$DOWNLOADED_FILE" | grep -q "XZ"; then
+         echo "🔧 Extracting XZ archive"
+         tar -xJf "$OLDPWD/$DOWNLOADED_FILE"
+       elif file "$OLDPWD/$DOWNLOADED_FILE" | grep -q "gzip"; then
+         echo "🔧 Extracting gzip archive"
+         tar -xzf "$OLDPWD/$DOWNLOADED_FILE"
+       else
+         echo "⚠️ Unknown archive format, trying general extraction..."
+         tar -xf "$OLDPWD/$DOWNLOADED_FILE" || {
+         echo "::error::Failed to extract archive"
+         exit 1
+    }
+  fi
+
+       # 移动解压后的目录到工作目录
+       mv immortalwrt-imagebuilder-* ../imagebuilder
+       cd ..
+       rm -rf temp_extract
+       echo "✅ ImageBuilder extracted successfully"
+       echo "::endgroup::"
 
     # ===== 新增的自定义软件包复制步骤 =====
     - name: 📥 Copy Custom Packages
