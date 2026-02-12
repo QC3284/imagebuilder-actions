@@ -139,8 +139,8 @@ jobs:
         echo "::endgroup::"
 
     - name: ⬇️ Check for Cached ImageBuilder
-     id: check-cache
-     run: |
+      id: check-cache
+      run: |
         echo "::group::Checking for cached ImageBuilder"
         SANITIZED_TARGET="${{ steps.target.outputs.sanitized_target }}"
         VERSION="${{ matrix.version }}"
@@ -164,23 +164,23 @@ jobs:
         elif [ -f "immortalwrt_imagebuilder/$EXPECTED_FILE_GENERIC_XZ" ]; then
           CACHED_FILE="immortalwrt_imagebuilder/$EXPECTED_FILE_GENERIC_XZ"
          echo "::notice::Found cached ImageBuilder: $EXPECTED_FILE_GENERIC_XZ"
-       fi
+        fi
 
-       if [ -n "$CACHED_FILE" ]; then
-         # 验证缓存文件大小
-         FILE_SIZE=$(stat -c%s "$CACHED_FILE")
-       if [ "$FILE_SIZE" -gt 1000000 ]; then
+        if [ -n "$CACHED_FILE" ]; then
+          # 验证缓存文件大小
+          FILE_SIZE=$(stat -c%s "$CACHED_FILE")
+        if [ "$FILE_SIZE" -gt 1000000 ]; then
           echo "::notice::Cache file is valid (size: $FILE_SIZE bytes), using cached file"
           echo "use_cache=true" >> $GITHUB_OUTPUT
           echo "cached_file=$CACHED_FILE" >> $GITHUB_OUTPUT
-       else
+        else
           echo "::warning::Cached file is too small, will download fresh copy"
           echo "use_cache=false" >> $GITHUB_OUTPUT
-       fi
-       else
+        fi
+        else
           echo "::notice::No cached ImageBuilder found, will download"
           echo "use_cache=false" >> $GITHUB_OUTPUT
-       fi
+        fi
           echo "::endgroup::"
 
     - name: ⬇️ Download ImageBuilder (with axel)
@@ -252,53 +252,53 @@ jobs:
           echo "downloaded_file=immortalwrt_imagebuilder/imagebuilder.tar.zst" >> $GITHUB_OUTPUT
         fi
 
-   - name: 📦 Extract ImageBuilder
-     run: |
-       echo "::group::Extracting ImageBuilder"
-       DOWNLOADED_FILE="${{ steps.set-file-path.outputs.downloaded_file }}"
-       echo "🔍 Using file: $DOWNLOADED_FILE"
+    - name: 📦 Extract ImageBuilder
+      run: |
+        echo "::group::Extracting ImageBuilder"
+        DOWNLOADED_FILE="${{ steps.set-file-path.outputs.downloaded_file }}"
+        echo "🔍 Using file: $DOWNLOADED_FILE"
 
-       if [ ! -f "$DOWNLOADED_FILE" ]; then
-         echo "::error::Downloaded ImageBuilder archive not found at $DOWNLOADED_FILE!"
-         ls -la immortalwrt_imagebuilder/ || true
-         exit 1
-       fi
+        if [ ! -f "$DOWNLOADED_FILE" ]; then
+          echo "::error::Downloaded ImageBuilder archive not found at $DOWNLOADED_FILE!"
+          ls -la immortalwrt_imagebuilder/ || true
+          exit 1
+        fi
 
-       FILESIZE=$(stat -c%s "$DOWNLOADED_FILE")
-       echo "📊 Archive size: $FILESIZE bytes"
+        FILESIZE=$(stat -c%s "$DOWNLOADED_FILE")
+        echo "📊 Archive size: $FILESIZE bytes"
 
-       if [ "$FILESIZE" -lt 1000000 ]; then
-         echo "::error::Archive file is too small (可能下载中断)"
-         exit 1
-       fi
+        if [ "$FILESIZE" -lt 1000000 ]; then
+          echo "::error::Archive file is too small (可能下载中断)"
+          exit 1
+        fi
 
-       # 创建临时目录进行解压
-       mkdir -p temp_extract
-       cd temp_extract
+        # 创建临时目录进行解压
+        mkdir -p temp_extract
+        cd temp_extract
 
-       if file "$OLDPWD/$DOWNLOADED_FILE" | grep -q "Zstandard"; then
-         echo "🔧 Extracting Zstandard archive"
-         tar -I zstd -xf "$OLDPWD/$DOWNLOADED_FILE"
-       elif file "$OLDPWD/$DOWNLOADED_FILE" | grep -q "XZ"; then
-         echo "🔧 Extracting XZ archive"
-         tar -xJf "$OLDPWD/$DOWNLOADED_FILE"
-       elif file "$OLDPWD/$DOWNLOADED_FILE" | grep -q "gzip"; then
-         echo "🔧 Extracting gzip archive"
-         tar -xzf "$OLDPWD/$DOWNLOADED_FILE"
-       else
-         echo "⚠️ Unknown archive format, trying general extraction..."
-         tar -xf "$OLDPWD/$DOWNLOADED_FILE" || {
-         echo "::error::Failed to extract archive"
-         exit 1
-    }
-  fi
+        if file "$OLDPWD/$DOWNLOADED_FILE" | grep -q "Zstandard"; then
+          echo "🔧 Extracting Zstandard archive"
+          tar -I zstd -xf "$OLDPWD/$DOWNLOADED_FILE"
+        elif file "$OLDPWD/$DOWNLOADED_FILE" | grep -q "XZ"; then
+          echo "🔧 Extracting XZ archive"
+          tar -xJf "$OLDPWD/$DOWNLOADED_FILE"
+        elif file "$OLDPWD/$DOWNLOADED_FILE" | grep -q "gzip"; then
+          echo "🔧 Extracting gzip archive"
+          tar -xzf "$OLDPWD/$DOWNLOADED_FILE"
+        else
+          echo "⚠️ Unknown archive format, trying general extraction..."
+          tar -xf "$OLDPWD/$DOWNLOADED_FILE" || {
+          echo "::error::Failed to extract archive"
+          exit 1
+        }
+        fi
 
-       # 移动解压后的目录到工作目录
-       mv immortalwrt-imagebuilder-* ../imagebuilder
-       cd ..
-       rm -rf temp_extract
-       echo "✅ ImageBuilder extracted successfully"
-       echo "::endgroup::"
+        # 移动解压后的目录到工作目录
+        mv immortalwrt-imagebuilder-* ../imagebuilder
+        cd ..
+        rm -rf temp_extract
+        echo "✅ ImageBuilder extracted successfully"
+        echo "::endgroup::"
 
     # ===== 新增的自定义软件包复制步骤 =====
     - name: 📥 Copy Custom Packages
