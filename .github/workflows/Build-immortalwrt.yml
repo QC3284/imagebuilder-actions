@@ -192,7 +192,7 @@ jobs:
         VERSION="${{ matrix.version }}"
 
         # 使用官方下载源
-        BASE_URL="https://immortalwrt.kyarucloud.moe/releases/$VERSION/targets/${{ steps.target.outputs.target }}"
+        BASE_URL="https://downloads.immortalwrt.org/releases/$VERSION/targets/${{ steps.target.outputs.target }}"
 
         URLS=(
           "$BASE_URL/immortalwrt-imagebuilder-$VERSION-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
@@ -437,11 +437,11 @@ jobs:
           echo "📄 Original filename: $filename"
 
           # 分析文件名结构并插入日期
-          # 原始格式: immortalwrt-24.10.4-mediatek-filogic-glinet_gl-mt3000-squashfs-sysupgrade.bin
-          # 新格式: immortalwrt-24.10.4-20250117204610-mediatek-filogic-glinet_gl-mt3000-squashfs-sysupgrade.bin
+          # 原始格式: immortalwrt-24.10.5-mediatek-filogic-glinet_gl-mt3000-squashfs-sysupgrade.bin
+          # 新格式: immortalwrt-24.10.5-20250117204610-mediatek-filogic-glinet_gl-mt3000-squashfs-sysupgrade.bin
 
           if [[ "$filename" =~ ^(immortalwrt-[0-9]+\.[0-9]+\.[0-9]+)-([a-zA-Z0-9_-]+)$ ]]; then
-            # 匹配类似: immortalwrt-24.10.4-mediatek-filogic-glinet_gl-mt3000-squashfs-sysupgrade.bin
+            # 匹配类似: immortalwrt-24.10.5-mediatek-filogic-glinet_gl-mt3000-squashfs-sysupgrade.bin
             prefix="${BASH_REMATCH[1]}"
             suffix="${BASH_REMATCH[2]}"
             new_filename="${prefix}-${FORMATTED_DATE}-${suffix}"
