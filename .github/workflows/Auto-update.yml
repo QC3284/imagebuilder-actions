@@ -10,7 +10,7 @@ on:
 jobs:
   check-and-update:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -36,16 +36,16 @@ jobs:
       run: |
         cd gxjc
         echo "Calculating hashes for local openclash.ipk..."
-        
+
         # 计算多种哈希值
         SHA256_HASH=$(sha256sum openclash.ipk | cut -d' ' -f1)
         SHA1_HASH=$(sha1sum openclash.ipk | cut -d' ' -f1)
         MD5_HASH=$(md5sum openclash.ipk | cut -d' ' -f1)
-        
+
         echo "local_sha256=$SHA256_HASH" >> $GITHUB_OUTPUT
         echo "local_sha1=$SHA1_HASH" >> $GITHUB_OUTPUT
         echo "local_md5=$MD5_HASH" >> $GITHUB_OUTPUT
-        
+
         echo "Local file hashes:"
         echo "SHA256: $SHA256_HASH"
         echo "SHA1: $SHA1_HASH"
@@ -60,12 +60,12 @@ jobs:
         PACKAGE_LIST=$(curl -s "https://downloads.immortalwrt.org/releases/24.10.5/packages/aarch64_cortex-a53/luci/" | \
           grep -o 'href="luci-app-openclash[^"]*\.ipk"' | \
           sed 's/href="//' | sed 's/"//' | sort -V | tail -1)
-        
+
         if [ -z "$PACKAGE_LIST" ]; then
           echo "❌ No OpenClash packages found"
           exit 1
         fi
-        
+
         LATEST_PACKAGE=$PACKAGE_LIST
         echo "latest_package=$LATEST_PACKAGE" >> $GITHUB_OUTPUT
         echo "Latest package: $LATEST_PACKAGE"
@@ -76,24 +76,24 @@ jobs:
       run: |
         PACKAGE_URL="https://downloads.immortalwrt.org/releases/24.10.5/packages/aarch64_cortex-a53/luci/${{ steps.get_version.outputs.latest_package }}"
         echo "Downloading: $PACKAGE_URL"
-        
+
         # 下载文件
         wget -O latest_openclash.ipk "$PACKAGE_URL"
-        
+
         if [ ! -f "latest_openclash.ipk" ]; then
           echo "❌ Failed to download package"
           exit 1
         fi
-        
+
         # 计算下载文件的哈希值
         REMOTE_SHA256=$(sha256sum latest_openclash.ipk | cut -d' ' -f1)
         REMOTE_SHA1=$(sha1sum latest_openclash.ipk | cut -d' ' -f1)
         REMOTE_MD5=$(md5sum latest_openclash.ipk | cut -d' ' -f1)
-        
+
         echo "remote_sha256=$REMOTE_SHA256" >> $GITHUB_OUTPUT
         echo "remote_sha1=$REMOTE_SHA1" >> $GITHUB_OUTPUT
         echo "remote_md5=$REMOTE_MD5" >> $GITHUB_OUTPUT
-        
+
         echo "Remote file hashes:"
         echo "SHA256: $REMOTE_SHA256"
         echo "SHA1: $REMOTE_SHA1"
@@ -104,7 +104,7 @@ jobs:
       if: steps.check_file.outputs.file_exists == 'true'
       run: |
         echo "Comparing hashes..."
-        
+
         # 比较哈希值（任一匹配即可）
         if [ "${{ steps.local_hash.outputs.local_sha256 }}" == "${{ steps.download_package.outputs.remote_sha256 }}" ] || \
            [ "${{ steps.local_hash.outputs.local_sha1 }}" == "${{ steps.download_package.outputs.remote_sha1 }}" ] || \
@@ -114,7 +114,7 @@ jobs:
         else
           echo "Hashes differ - update required"
           echo "update_needed=true" >> $GITHUB_OUTPUT
-          
+
           # 替换本地文件
           mv latest_openclash.ipk gxjc/openclash.ipk
           echo "✅ Local file updated"
@@ -126,17 +126,17 @@ jobs:
         # 配置git用户信息
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        
+
         # 提交更改
         git add gxjc/openclash.ipk
         git commit -m "chore: update OpenClash package to latest version
-        
+
         Updated OpenClash IPK file:
         - Package: ${{ steps.get_version.outputs.latest_package }}
         - SHA256: ${{ steps.download_package.outputs.remote_sha256 }}
         - SHA1: ${{ steps.download_package.outputs.remote_sha1 }}
         - MD5: ${{ steps.download_package.outputs.remote_md5 }}"
-        
+
         # 推送更改
         git push
 
@@ -146,22 +146,22 @@ jobs:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         echo "Triggering other workflows..."
-        
+
         # 获取仓库信息
         REPO=${{ github.repository }}
-        
+
         # 使用gh命令触发其他工作流
         # 这里需要根据您具体的workflow文件名来调整
         gh workflow list
         echo "Use the above workflow list to trigger specific workflows"
-        
+
         # 示例：触发所有工作流（谨慎使用）
         # gh workflow run --repo $REPO --ref ${{ github.ref }} ALL_WORKFLOWS
-        
+
         # 或者触发特定工作流，例如：
         # gh workflow run "build.yml" --repo $REPO
         # gh workflow run "deploy.yml" --repo $REPO
-        
+
         gh workflow run "Build-immortalwrt.yml" --repo $REPO
 
         echo "Please configure specific workflow triggers as needed"

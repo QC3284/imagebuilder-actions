@@ -29,19 +29,19 @@ jobs:
           "config/version.json"
           "config/device_targets.json"
         )
-        
+
         MISSING_FILES=()
         for file in "${CONFIG_FILES[@]}"; do
           if [ ! -f "$file" ]; then
             MISSING_FILES+=("$file")
           fi
         done
-        
+
         if [ ${#MISSING_FILES[@]} -ne 0 ]; then
           echo "::error::Missing required config files: ${MISSING_FILES[*]}"
           exit 1
         fi
-        
+
         # 验证JSON格式
         for file in "${CONFIG_FILES[@]}"; do
           if ! jq empty "$file" 2>/dev/null; then
@@ -117,11 +117,11 @@ jobs:
       run: |
         echo "::group::Reading device target mapping"
         DEVICE="${{ matrix.device }}"
-        
+
         # 从配置文件读取设备映射
         if [ -f "config/device_targets.json" ]; then
           TARGET=$(jq -r --arg device "$DEVICE" '.[$device]' config/device_targets.json 2>/dev/null)
-          
+
           if [ "$TARGET" = "null" ] || [ -z "$TARGET" ]; then
             echo "::error::Device $DEVICE not found in config/device_targets.json"
             echo "::error::Available devices in config:"
@@ -583,7 +583,7 @@ jobs:
 
           ### 🔐 SHA256 Checksums:
           ```
-           $ {{ steps.calculate-hashes.outputs.sha256_content }}
+           ${{ steps.calculate-hashes.outputs.sha256_content }}
           ```
 
           ### 📝 Other Hash Algorithms:
