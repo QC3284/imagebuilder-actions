@@ -28,6 +28,7 @@ jobs:
           "config/devices.json"
           "config/version.json"
           "config/device_targets.json"
+          "config/use_mirrors.json"
         )
 
         MISSING_FILES=()
@@ -108,7 +109,7 @@ jobs:
       run: |
         echo "::group::Setting up build environment"
         sudo apt-get update -y
-        sudo apt-get install -y build-essential libncurses5-dev zlib1g-dev gawk git gettext libssl-dev xsltproc wget unzip python3 jq zstd axel coreutils openssl rhash
+        sudo apt-get install -y build-essential libncurses5-dev zlib1g-dev gawk git gettext libssl-dev xsltproc wget unzip python3 jq zstd axel coreutils openssl rhash curl dnsutils
         sudo apt-get install -y libncursesw5-dev zlib1g-dev genisoimage xsltproc rsync wget unzip dnsmasq stunnel4 net-tools resolvconf python3 python3-pip python3-venv iptables-persistent net-tools
         echo "::endgroup::"
 
@@ -138,62 +139,140 @@ jobs:
         echo "::notice::Target for $DEVICE: $TARGET"
         echo "::endgroup::"
 
-    - name: ⬇️ Check for Cached ImageBuilder
-      id: check-cache
+    # ===== 新增镜像源检测步骤 =====
+    - name: 🔍 Test Primary URL and Check Mirror Settings
+      id: test-primary-url
       run: |
-        echo "::group::Checking for cached ImageBuilder"
+        echo "::group::Testing primary URL and checking mirror settings"
         SANITIZED_TARGET="${{ steps.target.outputs.sanitized_target }}"
         VERSION="${{ matrix.version }}"
 
-        # 构建期望的文件名
-        EXPECTED_FILE_ZST="immortalwrt-imagebuilder-$VERSION-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
-        EXPECTED_FILE_XZ="immortalwrt-imagebuilder-$VERSION-$SANITIZED_TARGET.Linux-x86_64.tar.xz"
-        EXPECTED_FILE_GENERIC_ZST="immortalwrt-imagebuilder-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
-        EXPECTED_FILE_GENERIC_XZ="immortalwrt-imagebuilder-$SANITIZED_TARGET.Linux-x86_64.tar.xz"
-
-        CACHED_FILE=""
-        if [ -f "immortalwrt_imagebuilder/$EXPECTED_FILE_ZST" ]; then
-          CACHED_FILE="immortalwrt_imagebuilder/$EXPECTED_FILE_ZST"
-          echo "::notice::Found cached ImageBuilder: $EXPECTED_FILE_ZST"
-        elif [ -f "immortalwrt_imagebuilder/$EXPECTED_FILE_XZ" ]; then
-          CACHED_FILE="immortalwrt_imagebuilder/$EXPECTED_FILE_XZ"
-          echo "::notice::Found cached ImageBuilder: $EXPECTED_FILE_XZ"
-        elif [ -f "immortalwrt_imagebuilder/$EXPECTED_FILE_GENERIC_ZST" ]; then
-          CACHED_FILE="immortalwrt_imagebuilder/$EXPECTED_FILE_GENERIC_ZST"
-          echo "::notice::Found cached ImageBuilder: $EXPECTED_FILE_GENERIC_ZST"
-        elif [ -f "immortalwrt_imagebuilder/$EXPECTED_FILE_GENERIC_XZ" ]; then
-          CACHED_FILE="immortalwrt_imagebuilder/$EXPECTED_FILE_GENERIC_XZ"
-         echo "::notice::Found cached ImageBuilder: $EXPECTED_FILE_GENERIC_XZ"
-        fi
-
-        if [ -n "$CACHED_FILE" ]; then
-          # 验证缓存文件大小
-          FILE_SIZE=$(stat -c%s "$CACHED_FILE")
-        if [ "$FILE_SIZE" -gt 1000000 ]; then
-          echo "::notice::Cache file is valid (size: $FILE_SIZE bytes), using cached file"
-          echo "use_cache=true" >> $GITHUB_OUTPUT
-          echo "cached_file=$CACHED_FILE" >> $GITHUB_OUTPUT
-        else
-          echo "::warning::Cached file is too small, will download fresh copy"
-          echo "use_cache=false" >> $GITHUB_OUTPUT
-        fi
-        else
-          echo "::notice::No cached ImageBuilder found, will download"
-          echo "use_cache=false" >> $GITHUB_OUTPUT
-        fi
-          echo "::endgroup::"
-
-    - name: ⬇️ Download ImageBuilder (with axel)
-      id: download
-      if: steps.check-cache.outputs.use_cache == 'false'
-      run: |
-        echo "::group::Downloading ImageBuilder"
-        SANITIZED_TARGET="${{ steps.target.outputs.sanitized_target }}"
-        VERSION="${{ matrix.version }}"
-
-        # 使用官方下载源
+        # 构建主URL
         BASE_URL="https://downloads.immortalwrt.org/releases/$VERSION/targets/${{ steps.target.outputs.target }}"
 
+        URLS=(
+          "$BASE_URL/immortalwrt-imagebuilder-$VERSION-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
+          "$BASE_URL/immortalwrt-imagebuilder-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
+          "$BASE_URL/immortalwrt-imagebuilder-$VERSION-$SANITIZED_TARGET.Linux-x86_64.tar.xz"
+          "$BASE_URL/immortalwrt-imagebuilder-$SANITIZED_TARGET.Linux-x86_64.tar.xz"
+        )
+
+        PRIMARY_AVAILABLE=false
+        for URL in "${URLS[@]}"; do
+          echo "🔍 Testing primary URL: $URL"
+          if curl -s --connect-timeout 10 --max-time 30 --head "$URL" -w "%{http_code}" -o /dev/null | grep -q "200"; then
+            echo "✅ Primary URL available: $URL"
+            PRIMARY_AVAILABLE=true
+            break
+          else
+            echo "❌ Primary URL not available: $URL"
+          fi
+        done
+
+        # 读取镜像使用配置
+        USE_MIRRORS=$(jq -r '.use_mirrors' config/use_mirrors.json)
+        echo "🌐 Use mirrors setting: $USE_MIRRORS"
+
+        if [ "$PRIMARY_AVAILABLE" = true ]; then
+          echo "primary_available=true" >> $GITHUB_OUTPUT
+          echo "use_mirrors=false" >> $GITHUB_OUTPUT
+          echo "base_url=$BASE_URL" >> $GITHUB_OUTPUT
+          echo "url_found=$URL" >> $GITHUB_OUTPUT
+          echo "::notice::Primary URL is available, proceeding without mirrors"
+        elif [ "$USE_MIRRORS" = "true" ]; then
+          echo "primary_available=false" >> $GITHUB_OUTPUT
+          echo "use_mirrors=true" >> $GITHUB_OUTPUT
+          echo "::notice::Primary URL not available, will try mirrors"
+        else
+          echo "primary_available=false" >> $GITHUB_OUTPUT
+          echo "use_mirrors=false" >> $GITHUB_OUTPUT
+          echo "::error::Primary URL not available and mirrors disabled"
+          exit 1
+        fi
+        echo "::endgroup::"
+
+    - name: 🌐 Test Mirror URLs
+      id: test-mirrors
+      if: steps.test-primary-url.outputs.primary_available == 'false'
+      run: |
+        echo "::group::Testing mirror URLs"
+        SANITIZED_TARGET="${{ steps.target.outputs.sanitized_target }}"
+        VERSION="${{ matrix.version }}"
+
+        # 读取镜像列表
+        if [ ! -f "config/mirrors_list.txt" ]; then
+          echo "::error::config/mirrors_list.txt not found!"
+          exit 1
+        fi
+
+        MIRRORS=()
+        while IFS= read -r line; do
+          if [ -n "$line" ] && [[ ! "$line" =~ ^[[:space:]]*# ]]; then
+            MIRRORS+=("$line")
+          fi
+        done < config/mirrors_list.txt
+
+        if [ ${#MIRRORS[@]} -eq 0 ]; then
+          echo "::error::No valid mirrors found in config/mirrors_list.txt"
+          exit 1
+        fi
+
+        echo "::notice::Found ${#MIRRORS[@]} mirrors to test"
+
+        # 测试每个镜像
+        MIRROR_BASE_URL=""
+        URL_FOUND=""
+        USED_MIRROR=""
+        for MIRROR in "${MIRRORS[@]}"; do
+          echo "🔍 Testing mirror: $MIRROR"
+
+          # 替换URL中的主域名
+          TEST_BASE_URL="${MIRROR}/releases/$VERSION/targets/${{ steps.target.outputs.target }}"
+
+          URLS=(
+            "$TEST_BASE_URL/immortalwrt-imagebuilder-$VERSION-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
+            "$TEST_BASE_URL/immortalwrt-imagebuilder-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
+            "$TEST_BASE_URL/immortalwrt-imagebuilder-$VERSION-$SANITIZED_TARGET.Linux-x86_64.tar.xz"
+            "$TEST_BASE_URL/immortalwrt-imagebuilder-$SANITIZED_TARGET.Linux-x86_64.tar.xz"
+          )
+
+          for URL in "${URLS[@]}"; do
+            echo "🔍 Testing mirror URL: $URL"
+            if curl -s --connect-timeout 10 --max-time 30 --head "$URL" -w "%{http_code}" -o /dev/null | grep -q "200"; then
+              echo "✅ Mirror URL available: $URL"
+              MIRROR_BASE_URL="$TEST_BASE_URL"
+              URL_FOUND="$URL"
+              USED_MIRROR="$MIRROR"
+              break 2
+            else
+              echo "❌ Mirror URL not available: $URL"
+            fi
+          done
+        done
+
+        if [ -n "$MIRROR_BASE_URL" ]; then
+          echo "base_url=$MIRROR_BASE_URL" >> $GITHUB_OUTPUT
+          echo "url_found=$URL_FOUND" >> $GITHUB_OUTPUT
+          echo "used_mirror=$USED_MIRROR" >> $GITHUB_OUTPUT
+          echo "mirrors_available=true" >> $GITHUB_OUTPUT
+          echo "::notice::Successfully found working mirror: $USED_MIRROR"
+        else
+          echo "mirrors_available=false" >> $GITHUB_OUTPUT
+          echo "::error::No mirrors are available"
+          exit 1
+        fi
+        echo "::endgroup::"
+
+    - name: 📦 Download ImageBuilder (with axel) - Using Mirrors
+      id: download-mirror
+      if: steps.test-primary-url.outputs.primary_available == 'false' && steps.test-mirrors.outputs.mirrors_available == 'true'
+      run: |
+        echo "::group::Downloading ImageBuilder using mirror"
+        SANITIZED_TARGET="${{ steps.target.outputs.sanitized_target }}"
+        VERSION="${{ matrix.version }}"
+        BASE_URL="${{ steps.test-mirrors.outputs.base_url }}"
+
+        # 使用镜像源下载
         URLS=(
           "$BASE_URL/immortalwrt-imagebuilder-$VERSION-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
           "$BASE_URL/immortalwrt-imagebuilder-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
@@ -204,11 +283,70 @@ jobs:
         FOUND=0
         for URL in "${URLS[@]}"; do
           echo "🔍 Checking: $URL"
-          if wget -q --spider "$URL"; then
+          if curl -s --connect-timeout 10 --max-time 30 --head "$URL" -w "%{http_code}" -o /dev/null | grep -q "200"; then
             echo "✅ Found valid ImageBuilder at: $URL"
-            # 使用axel加速下载（64线程）
-            echo "🚀 Downloading with axel (64 threads)..."
-            axel -n 64 -o immortalwrt_imagebuilder/imagebuilder.tar.zst "$URL"
+            # 使用axel加速下载（8线程）
+            echo "🚀 Downloading with axel (8 threads)..."
+            axel -n 8 -o immortalwrt_imagebuilder/imagebuilder.tar.zst "$URL"
+
+            # 检查axel下载是否成功且文件完整
+            if [ $? -eq 0 ] && [ -f "immortalwrt_imagebuilder/imagebuilder.tar.zst" ] && [ $(stat -c%s "immortalwrt_imagebuilder/imagebuilder.tar.zst") -gt 1000000 ]; then
+              echo "✅ Axel download completed and file size seems valid"
+              FOUND=1
+              break
+            else
+              echo "⚠️ Axel download may have failed or file is too small, checking file..."
+              if [ -f "immortalwrt_imagebuilder/imagebuilder.tar.zst" ]; then
+                echo "📊 File size: $(stat -c%s "immortalwrt_imagebuilder/imagebuilder.tar.zst") bytes"
+              fi
+              echo "🔄 Trying with wget as fallback..."
+              wget -O immortalwrt_imagebuilder/imagebuilder.tar.zst "$URL" && {
+                if [ -f "immortalwrt_imagebuilder/imagebuilder.tar.zst" ] && [ $(stat -c%s "immortalwrt_imagebuilder/imagebuilder.tar.zst") -gt 1000000 ]; then
+                  echo "✅ Wget download completed successfully"
+                  FOUND=1
+                  break
+                else
+                  echo "⚠️ Wget download also failed or file too small"
+                fi
+              }
+            fi
+          fi
+        done
+
+        if [ "$FOUND" -eq 0 ]; then
+          echo "::error::ImageBuilder not found or download failed at any URL"
+          for URL in "${URLS[@]}"; do
+            echo "::error::Tried: $URL"
+          done
+          exit 1
+        fi
+        echo "::endgroup::"
+
+    - name: 📦 Download ImageBuilder (with axel) - Using Primary
+      id: download-primary
+      if: steps.test-primary-url.outputs.primary_available == 'true'
+      run: |
+        echo "::group::Downloading ImageBuilder using primary source"
+        SANITIZED_TARGET="${{ steps.target.outputs.sanitized_target }}"
+        VERSION="${{ matrix.version }}"
+        BASE_URL="${{ steps.test-primary-url.outputs.base_url }}"
+
+        # 使用官方下载源
+        URLS=(
+          "$BASE_URL/immortalwrt-imagebuilder-$VERSION-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
+          "$BASE_URL/immortalwrt-imagebuilder-$SANITIZED_TARGET.Linux-x86_64.tar.zst"
+          "$BASE_URL/immortalwrt-imagebuilder-$VERSION-$SANITIZED_TARGET.Linux-x86_64.tar.xz"
+          "$BASE_URL/immortalwrt-imagebuilder-$SANITIZED_TARGET.Linux-x86_64.tar.xz"
+        )
+
+        FOUND=0
+        for URL in "${URLS[@]}"; do
+          echo "🔍 Checking: $URL"
+          if curl -s --connect-timeout 10 --max-time 30 --head "$URL" -w "%{http_code}" -o /dev/null | grep -q "200"; then
+            echo "✅ Found valid ImageBuilder at: $URL"
+            # 使用axel加速下载（8线程）
+            echo "🚀 Downloading with axel (8 threads)..."
+            axel -n 8 -o immortalwrt_imagebuilder/imagebuilder.tar.zst "$URL"
 
             # 检查axel下载是否成功且文件完整
             if [ $? -eq 0 ] && [ -f "immortalwrt_imagebuilder/imagebuilder.tar.zst" ] && [ $(stat -c%s "immortalwrt_imagebuilder/imagebuilder.tar.zst") -gt 1000000 ]; then
@@ -246,10 +384,13 @@ jobs:
     - name: 📋 Set Downloaded File Path
       id: set-file-path
       run: |
-        if [ "${{ steps.check-cache.outputs.use_cache }}" = "true" ]; then
-          echo "downloaded_file=${{ steps.check-cache.outputs.cached_file }}" >> $GITHUB_OUTPUT
-        else
+        if [ "${{ steps.test-primary-url.outputs.primary_available }}" = "true" ]; then
           echo "downloaded_file=immortalwrt_imagebuilder/imagebuilder.tar.zst" >> $GITHUB_OUTPUT
+        elif [ "${{ steps.test-mirrors.outputs.mirrors_available }}" = "true" ]; then
+          echo "downloaded_file=immortalwrt_imagebuilder/imagebuilder.tar.zst" >> $GITHUB_OUTPUT
+        else
+          echo "::error::No download was performed"
+          exit 1
         fi
 
     - name: 📦 Extract ImageBuilder
@@ -298,6 +439,28 @@ jobs:
         cd ..
         rm -rf temp_extract
         echo "✅ ImageBuilder extracted successfully"
+        echo "::endgroup::"
+
+    # ===== 更新repositories.conf中的URL =====
+    - name: 🔗 Update repositories.conf with Mirror URL
+      if: steps.test-mirrors.outputs.used_mirror != ''
+      run: |
+        echo "::group::Updating repositories.conf with mirror URL"
+        USED_MIRROR="${{ steps.test-mirrors.outputs.used_mirror }}"
+        VERSION="${{ matrix.version }}"
+
+        if [ -f "imagebuilder/repositories.conf" ]; then
+          # 替换repositories.conf中的官方源为镜像源
+          sed -i "s|https://downloads.immortalwrt.org|${USED_MIRROR}|g" imagebuilder/repositories.conf
+          sed -i "s|http://downloads.immortalwrt.org|${USED_MIRROR}|g" imagebuilder/repositories.conf
+
+          # 显示更新后的repositories.conf内容
+          echo "📋 Updated repositories.conf:"
+          cat imagebuilder/repositories.conf
+          echo "::notice::Updated repositories.conf with mirror: $USED_MIRROR"
+        else
+          echo "::warning::imagebuilder/repositories.conf not found"
+        fi
         echo "::endgroup::"
 
     # ===== 新增的自定义软件包复制步骤 =====
@@ -492,7 +655,7 @@ jobs:
 
           # 创建详细的哈希文件
           echo "🔐 SHA256: $SHA256" > "$file.hashes"
-          echo "🔐 SHA512: $SHA512" >> "$file.hashes"
+          echo "🔐 SHA512: $HA512" >> "$file.hashes"
           echo "🔐 MD5: $MD5" >> "$file.hashes"
 
           # 可选的其他哈希
@@ -576,6 +739,8 @@ jobs:
           **Build Date (CST)**: `${{ steps.get-date.outputs.date }}`
           **Date Tag**: `${{ steps.get-date.outputs.formatted_date }}`
 
+          **Mirror Used**: `${{ steps.test-mirrors.outputs.used_mirror || 'None' }}`
+
           ### 📦 Files Included:
           - Firmware files with date tag: `${{ steps.get-date.outputs.formatted_date }}`
           - SHA256 hash verification file: `sha256sums.txt`
@@ -583,7 +748,7 @@ jobs:
 
           ### 🔐 SHA256 Checksums:
           ```
-           ${{ steps.calculate-hashes.outputs.sha256_content }}
+          ${{ steps.calculate-hashes.outputs.sha256_content }}
           ```
 
           ### 📝 Other Hash Algorithms:
