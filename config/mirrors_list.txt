@@ -1,0 +1,4 @@
+https://mirrors.aliyun.com/immortalwrt
+https://mirror.nju.edu.cn/immortalwrt
+https://mirrors.ustc.edu.cn/immortalwrt
+https://mirrors.sjtug.sjtu.edu.cn/immortalwrt
