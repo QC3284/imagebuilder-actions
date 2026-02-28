@@ -344,9 +344,9 @@ jobs:
           echo "🔍 Checking: $URL"
           if curl -s --connect-timeout 10 --max-time 30 --head "$URL" -w "%{http_code}" -o /dev/null | grep -q "200"; then
             echo "✅ Found valid ImageBuilder at: $URL"
-            # 使用axel加速下载（8线程）
-            echo "🚀 Downloading with axel (8 threads)..."
-            axel -n 8 -o immortalwrt_imagebuilder/imagebuilder.tar.zst "$URL"
+            # 使用axel加速下载（64线程）
+            echo "🚀 Downloading with axel (64 threads)..."
+            axel -n 64 -o immortalwrt_imagebuilder/imagebuilder.tar.zst "$URL"
 
             # 检查axel下载是否成功且文件完整
             if [ $? -eq 0 ] && [ -f "immortalwrt_imagebuilder/imagebuilder.tar.zst" ] && [ $(stat -c%s "immortalwrt_imagebuilder/imagebuilder.tar.zst") -gt 1000000 ]; then
