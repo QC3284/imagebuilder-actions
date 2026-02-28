@@ -1,4 +1,7 @@
-https://mirrors.aliyun.com/immortalwrt
-https://mirror.nju.edu.cn/immortalwrt
 https://mirrors.ustc.edu.cn/immortalwrt
+https://mirrors.nju.edu.cn/immortalwrt
+https://mirrors.jlu.edu.cn/immortalwrt
+https://mirrors.zju.edu.cn/immortalwrt
+https://mirrors.pku.edu.cn/immortalwrt
+https://mirrors.shanghaitech.edu.cn/immortalwrt
 https://mirrors.sjtug.sjtu.edu.cn/immortalwrt
