@@ -160,7 +160,7 @@ jobs:
         PRIMARY_AVAILABLE=false
         for URL in "${URLS[@]}"; do
           echo "🔍 Testing primary URL: $URL"
-          if curl -s --connect-timeout 10 --max-time 30 --head "$URL" -w "%{http_code}" -o /dev/null | grep -q "200"; then
+          if curl -Ls --connect-timeout 10 --max-time 30 --head "$URL" -w "%{http_code}" -o /dev/null | grep -q "200"; then
             echo "✅ Primary URL available: $URL"
             PRIMARY_AVAILABLE=true
             break
@@ -238,7 +238,7 @@ jobs:
 
           for URL in "${URLS[@]}"; do
             echo "🔍 Testing mirror URL: $URL"
-            if curl -s --connect-timeout 10 --max-time 30 --head "$URL" -w "%{http_code}" -o /dev/null | grep -q "200"; then
+            if curl -Ls --connect-timeout 10 --max-time 30 --head "$URL" -w "%{http_code}" -o /dev/null | grep -q "200"; then
               echo "✅ Mirror URL available: $URL"
               MIRROR_BASE_URL="$TEST_BASE_URL"
               URL_FOUND="$URL"
@@ -283,7 +283,7 @@ jobs:
         FOUND=0
         for URL in "${URLS[@]}"; do
           echo "🔍 Checking: $URL"
-          if curl -s --connect-timeout 10 --max-time 30 --head "$URL" -w "%{http_code}" -o /dev/null | grep -q "200"; then
+          if curl -Ls --connect-timeout 10 --max-time 30 --head "$URL" -w "%{http_code}" -o /dev/null | grep -q "200"; then
             echo "✅ Found valid ImageBuilder at: $URL"
             # 使用axel加速下载（8线程）
             echo "🚀 Downloading with axel (8 threads)..."
@@ -342,7 +342,7 @@ jobs:
         FOUND=0
         for URL in "${URLS[@]}"; do
           echo "🔍 Checking: $URL"
-          if curl -s --connect-timeout 10 --max-time 30 --head "$URL" -w "%{http_code}" -o /dev/null | grep -q "200"; then
+          if curl -Ls --connect-timeout 10 --max-time 30 --head "$URL" -w "%{http_code}" -o /dev/null | grep -q "200"; then
             echo "✅ Found valid ImageBuilder at: $URL"
             # 使用axel加速下载（64线程）
             echo "🚀 Downloading with axel (64 threads)..."
