@@ -18,6 +18,38 @@ jobs:
         token: ${{ secrets.GITHUB_TOKEN }}
         fetch-depth: 0
 
+    - name: Check if config files exist
+      id: check_config
+      run: |
+        if [ -f "config/use_mirrors.json" ]; then
+          echo "use_mirrors_config_exists=true" >> $GITHUB_OUTPUT
+          echo "Use mirrors config file found"
+        else
+          echo "use_mirrors_config_exists=false" >> $GITHUB_OUTPUT
+          echo "❌ Use mirrors config file not found"
+        fi
+
+        if [ -f "config/mirrors_list.txt" ]; then
+          echo "mirrors_list_exists=true" >> $GITHUB_OUTPUT
+          echo "Mirrors list file found"
+        else
+          echo "mirrors_list_exists=false" >> $GITHUB_OUTPUT
+          echo "❌ Mirrors list file not found"
+        fi
+
+    - name: Read mirror configuration
+      id: read_mirror_config
+      if: steps.check_config.outputs.use_mirrors_config_exists == 'true'
+      run: |
+        USE_MIRRORS=$(cat config/use_mirrors.json | grep -o '"use_mirrors"[[:space:]]*:[[:space:]]*true')
+        if [ -n "$USE_MIRRORS" ]; then
+          echo "use_mirrors=true" >> $GITHUB_OUTPUT
+          echo "Mirror usage enabled based on config"
+        else
+          echo "use_mirrors=false" >> $GITHUB_OUTPUT
+          echo "Mirror usage disabled based on config"
+        fi
+
     - name: Check if openclash.ipk exists
       id: check_file
       run: |
@@ -37,32 +69,30 @@ jobs:
         cd gxjc
         echo "Calculating hashes for local openclash.ipk..."
 
-        # 计算多种哈希值
+        # 计算SHA256和MD5哈希值
         SHA256_HASH=$(sha256sum openclash.ipk | cut -d' ' -f1)
-        SHA1_HASH=$(sha1sum openclash.ipk | cut -d' ' -f1)
         MD5_HASH=$(md5sum openclash.ipk | cut -d' ' -f1)
 
         echo "local_sha256=$SHA256_HASH" >> $GITHUB_OUTPUT
-        echo "local_sha1=$SHA1_HASH" >> $GITHUB_OUTPUT
         echo "local_md5=$MD5_HASH" >> $GITHUB_OUTPUT
 
         echo "Local file hashes:"
         echo "SHA256: $SHA256_HASH"
-        echo "SHA1: $SHA1_HASH"
         echo "MD5: $MD5_HASH"
 
-    - name: Get latest OpenClash version info
-      id: get_version
+    - name: Get latest OpenClash version info from official source
+      id: get_version_official
       if: steps.check_file.outputs.file_exists == 'true'
+      continue-on-error: true
       run: |
         # 获取目录列表并解析最新的openclash包
-        echo "Fetching available OpenClash packages..."
-        PACKAGE_LIST=$(curl -s "https://immortalwrt.kyarucloud.moe/releases/24.10.5/packages/aarch64_cortex-a53/luci/" | \
+        echo "Fetching available OpenClash packages from official source..."
+        PACKAGE_LIST=$(curl -Ls "https://downloads.immortalwrt.org/releases/24.10.5/packages/aarch64_cortex-a53/luci/" | \
           grep -o 'href="luci-app-openclash[^"]*\.ipk"' | \
           sed 's/href="//' | sed 's/"//' | sort -V | tail -1)
 
         if [ -z "$PACKAGE_LIST" ]; then
-          echo "❌ No OpenClash packages found"
+          echo "❌ No OpenClash packages found from official source"
           exit 1
         fi
 
@@ -70,34 +100,206 @@ jobs:
         echo "latest_package=$LATEST_PACKAGE" >> $GITHUB_OUTPUT
         echo "Latest package: $LATEST_PACKAGE"
 
-    - name: Download latest OpenClash package
-      id: download_package
+    - name: Get mirrors list
+      id: get_mirrors
+      if: steps.read_mirror_config.outputs.use_mirrors == 'true' && steps.get_version_official.outcome != 'success'
+      run: |
+        if [ -f "config/mirrors_list.txt" ]; then
+          echo "Reading mirrors list..."
+          cat config/mirrors_list.txt > mirrors_temp.txt
+          TOTAL_MIRRORS=$(wc -l < mirrors_temp.txt)
+          echo "total_mirrors=$TOTAL_MIRRORS" >> $GITHUB_OUTPUT
+          cp mirrors_temp.txt all_mirrors.txt
+        else
+          echo "❌ Mirrors list file not found"
+          exit 1
+        fi
+
+    - name: Get latest OpenClash version info from mirrors
+      id: get_version_mirror
+      if: steps.read_mirror_config.outputs.use_mirrors == 'true' && steps.get_version_official.outcome != 'success'
+      run: |
+        # 尝试从镜像源获取最新版本信息
+        TRIED_COUNT=0
+        MAX_TRIES=${{ steps.get_mirrors.outputs.total_mirrors }}
+
+        while [ $TRIED_COUNT -lt $MAX_TRIES ]; do
+          # 随机选择一个镜像源
+          AVAILABLE_COUNT=$(wc -l < all_mirrors.txt)
+          if [ $AVAILABLE_COUNT -eq 0 ]; then
+            echo "❌ All mirrors have been tried"
+            exit 1
+          fi
+
+          RANDOM_LINE=$((RANDOM % AVAILABLE_COUNT + 1))
+          SELECTED_MIRROR=$(sed -n "${RANDOM_LINE}p" all_mirrors.txt)
+          echo "Trying mirror: $SELECTED_MIRROR"
+
+          # 从镜像源获取包列表
+          MIRROR_URL="$SELECTED_MIRROR/releases/24.10.5/packages/aarch64_cortex-a53/luci/"
+          PACKAGE_LIST=$(curl -Ls "$MIRROR_URL" | \
+            grep -o 'href="luci-app-openclash[^"]*\.ipk"' | \
+            sed 's/href="//' | sed 's/"//' | sort -V | tail -1)
+
+          if [ -n "$PACKAGE_LIST" ]; then
+            LATEST_PACKAGE=$PACKAGE_LIST
+            echo "latest_package=$LATEST_PACKAGE" >> $GITHUB_OUTPUT
+            echo "Latest package from mirror $SELECTED_MIRROR: $LATEST_PACKAGE"
+            break
+          else
+            echo "❌ No OpenClash packages found from mirror $SELECTED_MIRROR"
+
+            # 从未使用镜像列表中移除已尝试的镜像
+            sed -i "${RANDOM_LINE}d" all_mirrors.txt
+
+            TRIED_COUNT=$((TRIED_COUNT + 1))
+            if [ $TRIED_COUNT -ge $MAX_TRIES ]; then
+              echo "❌ All mirrors have been tried and failed"
+              exit 1
+            fi
+          fi
+        done
+
+    - name: Fail if both official and mirrors fail
+      if: steps.get_version_official.outcome != 'success' && steps.get_version_mirror.outcome != 'success'
+      run: |
+        echo "❌ Failed to get version info from both official source and mirrors"
+        exit 1
+
+    - name: Determine package URL
+      id: determine_url
       if: steps.check_file.outputs.file_exists == 'true'
       run: |
-        PACKAGE_URL="https://immortalwrt.kyarucloud.moe/releases/24.10.5/packages/aarch64_cortex-a53/luci/${{ steps.get_version.outputs.latest_package }}"
-        echo "Downloading: $PACKAGE_URL"
+        if [ "${{ steps.get_version_official.outcome }}" = "success" ]; then
+          PACKAGE_URL="https://immortalwrt.kyarucloud.moe/releases/24.10.5/packages/aarch64_cortex-a53/luci/${{ steps.get_version_official.outputs.latest_package }}"
+          echo "package_url=$PACKAGE_URL" >> $GITHUB_OUTPUT
+          echo "Using official source: $PACKAGE_URL"
+        elif [ "${{ steps.get_version_mirror.outcome }}" = "success" ]; then
+          # 从镜像源获取的包名，需要重新确定URL
+          # 首先尝试官方源下载（因为镜像可能不同步）
+          OFFICIAL_URL="https://immortalwrt.kyarucloud.moe/releases/24.10.5/packages/aarch64_cortex-a53/luci/${{ steps.get_version_mirror.outputs.latest_package }}"
+          if curl --output /dev/null --silent --head --fail "$OFFICIAL_URL"; then
+            echo "package_url=$OFFICIAL_URL" >> $GITHUB_OUTPUT
+            echo "Using official source (mirror version): $OFFICIAL_URL"
+          else
+            # 如果官方源不存在此包，则尝试从镜像源下载
+            # 需要再次从镜像源获取可用包
+            TRIED_COUNT=0
+            MAX_TRIES=${{ steps.get_mirrors.outputs.total_mirrors }}
+            while [ $TRIED_COUNT -lt $MAX_TRIES ]; do
+              AVAILABLE_COUNT=$(wc -l < all_mirrors.txt 2>/dev/null || wc -l < mirrors_temp.txt)
+              if [ $AVAILABLE_COUNT -eq 0 ]; then
+                echo "❌ All mirrors have been tried for download"
+                exit 1
+              fi
+
+              RANDOM_LINE=$((RANDOM % AVAILABLE_COUNT + 1))
+              SELECTED_MIRROR=$(sed -n "${RANDOM_LINE}p" all_mirrors.txt 2>/dev/null || sed -n "${RANDOM_LINE}p" mirrors_temp.txt)
+              MIRROR_URL="$SELECTED_MIRROR/releases/24.10.5/packages/aarch64_cortex-a53/luci/${{ steps.get_version_mirror.outputs.latest_package }}"
+
+              if curl --output /dev/null --silent --head --fail "$MIRROR_URL"; then
+                echo "package_url=$MIRROR_URL" >> $GITHUB_OUTPUT
+                echo "Using mirror source: $MIRROR_URL"
+                break
+              else
+                echo "❌ Mirror $SELECTED_MIRROR does not have the package"
+                sed -i "${RANDOM_LINE}d" all_mirrors.txt 2>/dev/null || true
+                TRIED_COUNT=$((TRIED_COUNT + 1))
+
+                if [ $TRIED_COUNT -ge $MAX_TRIES ]; then
+                  echo "❌ All mirrors have been tried for download and failed"
+                  exit 1
+                fi
+              fi
+            done
+          fi
+        fi
+
+    - name: Download latest OpenClash package from official
+      id: download_package_official
+      if: steps.check_file.outputs.file_exists == 'true' && steps.determine_url.outputs.package_url == 'https://immortalwrt.kyarucloud.moe/releases/24.10.5/packages/aarch64_cortex-a53/luci/${{ steps.get_version_official.outputs.latest_package }}'
+      continue-on-error: true
+      run: |
+        PACKAGE_URL="${{ steps.determine_url.outputs.package_url }}"
+        echo "Downloading from official: $PACKAGE_URL"
 
         # 下载文件
         wget -O latest_openclash.ipk "$PACKAGE_URL"
 
         if [ ! -f "latest_openclash.ipk" ]; then
-          echo "❌ Failed to download package"
+          echo "❌ Failed to download package from official source"
           exit 1
         fi
 
         # 计算下载文件的哈希值
         REMOTE_SHA256=$(sha256sum latest_openclash.ipk | cut -d' ' -f1)
-        REMOTE_SHA1=$(sha1sum latest_openclash.ipk | cut -d' ' -f1)
         REMOTE_MD5=$(md5sum latest_openclash.ipk | cut -d' ' -f1)
 
         echo "remote_sha256=$REMOTE_SHA256" >> $GITHUB_OUTPUT
-        echo "remote_sha1=$REMOTE_SHA1" >> $GITHUB_OUTPUT
         echo "remote_md5=$REMOTE_MD5" >> $GITHUB_OUTPUT
 
-        echo "Remote file hashes:"
+        echo "Remote file hashes from official:"
         echo "SHA256: $REMOTE_SHA256"
-        echo "SHA1: $REMOTE_SHA1"
         echo "MD5: $REMOTE_MD5"
+
+    - name: Download latest OpenClash package from mirrors
+      id: download_package_mirror
+      if: steps.check_file.outputs.file_exists == 'true' && steps.download_package_official.outcome != 'success' && steps.read_mirror_config.outputs.use_mirrors == 'true'
+      run: |
+        # 尝试从镜像源下载文件
+        TRIED_COUNT=0
+        MAX_TRIES=${{ steps.get_mirrors.outputs.total_mirrors }}
+
+        while [ $TRIED_COUNT -lt $MAX_TRIES ]; do
+          # 随机选择一个镜像源用于下载
+          AVAILABLE_COUNT=$(wc -l < all_mirrors.txt 2>/dev/null || wc -l < mirrors_temp.txt)
+          if [ $AVAILABLE_COUNT -eq 0 ]; then
+            echo "❌ All mirrors have been tried for download"
+            exit 1
+          fi
+
+          RANDOM_LINE=$((RANDOM % AVAILABLE_COUNT + 1))
+          SELECTED_MIRROR=$(sed -n "${RANDOM_LINE}p" all_mirrors.txt 2>/dev/null || sed -n "${RANDOM_LINE}p" mirrors_temp.txt)
+          PACKAGE_URL="$SELECTED_MIRROR/releases/24.10.5/packages/aarch64_cortex-a53/luci/${{ steps.get_version_mirror.outputs.latest_package }}"
+
+          echo "Attempting download from mirror: $PACKAGE_URL"
+
+          # 尝试下载文件
+          if wget -O latest_openclash.ipk "$PACKAGE_URL"; then
+            if [ -f "latest_openclash.ipk" ]; then
+              # 计算下载文件的哈希值
+              REMOTE_SHA256=$(sha256sum latest_openclash.ipk | cut -d' ' -f1)
+              REMOTE_MD5=$(md5sum latest_openclash.ipk | cut -d' ' -f1)
+
+              echo "remote_sha256=$REMOTE_SHA256" >> $GITHUB_OUTPUT
+              echo "remote_md5=$REMOTE_MD5" >> $GITHUB_OUTPUT
+
+              echo "Remote file hashes from mirror $SELECTED_MIRROR:"
+              echo "SHA256: $REMOTE_SHA256"
+              echo "MD5: $REMOTE_MD5"
+              break
+            else
+              echo "❌ File not downloaded properly from mirror $SELECTED_MIRROR"
+            fi
+          else
+            echo "❌ Failed to download from mirror $SELECTED_MIRROR"
+          fi
+
+          # 从未使用镜像列表中移除已尝试的镜像
+          sed -i "${RANDOM_LINE}d" all_mirrors.txt 2>/dev/null || true
+
+          TRIED_COUNT=$((TRIED_COUNT + 1))
+          if [ $TRIED_COUNT -ge $MAX_TRIES ]; then
+            echo "❌ All mirrors have been tried and failed for download"
+            exit 1
+          fi
+        done
+
+    - name: Fail if both official and mirrors download fail
+      if: steps.download_package_official.outcome != 'success' && steps.download_package_mirror.outcome != 'success'
+      run: |
+        echo "❌ Failed to download package from both official source and mirrors"
+        exit 1
 
     - name: Compare hashes and update if different
       id: compare_update
@@ -105,10 +307,11 @@ jobs:
       run: |
         echo "Comparing hashes..."
 
-        # 比较哈希值（任一匹配即可）
-        if [ "${{ steps.local_hash.outputs.local_sha256 }}" == "${{ steps.download_package.outputs.remote_sha256 }}" ] || \
-           [ "${{ steps.local_hash.outputs.local_sha1 }}" == "${{ steps.download_package.outputs.remote_sha1 }}" ] || \
-           [ "${{ steps.local_hash.outputs.local_md5 }}" == "${{ steps.download_package.outputs.remote_md5 }}" ]; then
+        # 比较哈希值（SHA256或MD5任一匹配即可）
+        if [ "${{ steps.local_hash.outputs.local_sha256 }}" == "${{ steps.download_package_official.outputs.remote_sha256 }}" ] || \
+           [ "${{ steps.local_hash.outputs.local_md5 }}" == "${{ steps.download_package_official.outputs.remote_md5 }}" ] || \
+           [ "${{ steps.local_hash.outputs.local_sha256 }}" == "${{ steps.download_package_mirror.outputs.remote_sha256 }}" ] || \
+           [ "${{ steps.local_hash.outputs.local_md5 }}" == "${{ steps.download_package_mirror.outputs.remote_md5 }}" ]; then
           echo "Hashes match - no update needed"
           echo "update_needed=false" >> $GITHUB_OUTPUT
         else
@@ -132,10 +335,9 @@ jobs:
         git commit -m "chore: update OpenClash package to latest version
 
         Updated OpenClash IPK file:
-        - Package: ${{ steps.get_version.outputs.latest_package }}
-        - SHA256: ${{ steps.download_package.outputs.remote_sha256 }}
-        - SHA1: ${{ steps.download_package.outputs.remote_sha1 }}
-        - MD5: ${{ steps.download_package.outputs.remote_md5 }}"
+        - Package: ${{ steps.get_version_official.outputs.latest_package || steps.get_version_mirror.outputs.latest_package }}
+        - SHA256: ${{ steps.download_package_official.outputs.remote_sha256 || steps.download_package_mirror.outputs.remote_sha256 }}
+        - MD5: ${{ steps.download_package_official.outputs.remote_md5 || steps.download_package_mirror.outputs.remote_md5 }}"
 
         # 推送更改
         git push
@@ -150,21 +352,10 @@ jobs:
         # 获取仓库信息
         REPO=${{ github.repository }}
 
-        # 使用gh命令触发其他工作流
-        # 这里需要根据您具体的workflow文件名来调整
-        gh workflow list
-        echo "Use the above workflow list to trigger specific workflows"
-
-        # 示例：触发所有工作流（谨慎使用）
-        # gh workflow run --repo $REPO --ref ${{ github.ref }} ALL_WORKFLOWS
-
-        # 或者触发特定工作流，例如：
-        # gh workflow run "build.yml" --repo $REPO
-        # gh workflow run "deploy.yml" --repo $REPO
-
+        # 触发构建工作流
         gh workflow run "Build-immortalwrt.yml" --repo $REPO
 
-        echo "Please configure specific workflow triggers as needed"
+        echo "Build workflow triggered"
 
     - name: Clean up
       if: always()
@@ -172,4 +363,10 @@ jobs:
         # 清理临时文件
         if [ -f "latest_openclash.ipk" ]; then
           rm -f latest_openclash.ipk
+        fi
+        if [ -f "mirrors_temp.txt" ]; then
+          rm -f mirrors_temp.txt
+        fi
+        if [ -f "all_mirrors.txt" ]; then
+          rm -f all_mirrors.txt
         fi
