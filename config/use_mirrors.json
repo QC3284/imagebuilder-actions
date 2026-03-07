@@ -1,5 +1,5 @@
 {
-  "use_mirrors": true,
+  "use_mirrors": false,
   "timeout_seconds": 30,
   "connection_timeout": 15
 }
