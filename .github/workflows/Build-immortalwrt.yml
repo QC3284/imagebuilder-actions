@@ -468,12 +468,12 @@ jobs:
       id: final-mirror-info
       run: |
         echo "::group::Setting final mirror information"
-        # 如果使用了镜像，从test-mirrors步骤获取；否则保持为空
+        # 如果使用了镜像，从test-mirrors步骤获取；否则设置为False
         if [ "${{ steps.test-mirrors.outputs.used_mirror }}" != "" ]; then
           echo "final_used_mirror=${{ steps.test-mirrors.outputs.used_mirror }}" >> $GITHUB_OUTPUT
           echo "::notice::Final mirror used: ${{ steps.test-mirrors.outputs.used_mirror }}"
         else
-          echo "final_used_mirror=None" >> $GITHUB_OUTPUT
+          echo "final_used_mirror=False" >> $GITHUB_OUTPUT
           echo "::notice::No mirror used, using primary source"
         fi
         echo "::endgroup::"
