@@ -463,6 +463,21 @@ jobs:
         fi
         echo "::endgroup::"
 
+    # ===== 新增步骤：设置最终使用的镜像信息 =====
+    - name: 🌐 Set Final Mirror Info
+      id: final-mirror-info
+      run: |
+        echo "::group::Setting final mirror information"
+        # 如果使用了镜像，从test-mirrors步骤获取；否则保持为空
+        if [ "${{ steps.test-mirrors.outputs.used_mirror }}" != "" ]; then
+          echo "final_used_mirror=${{ steps.test-mirrors.outputs.used_mirror }}" >> $GITHUB_OUTPUT
+          echo "::notice::Final mirror used: ${{ steps.test-mirrors.outputs.used_mirror }}"
+        else
+          echo "final_used_mirror=None" >> $GITHUB_OUTPUT
+          echo "::notice::No mirror used, using primary source"
+        fi
+        echo "::endgroup::"
+
     # ===== 新增的自定义软件包复制步骤 =====
     - name: 📥 Copy Custom Packages
       id: custom-pkgs
@@ -739,7 +754,7 @@ jobs:
           **Build Date (CST)**: `${{ steps.get-date.outputs.date }}`
           **Date Tag**: `${{ steps.get-date.outputs.formatted_date }}`
 
-          **Mirror Used**: `${{ steps.test-mirrors.outputs.used_mirror || 'None' }}`
+          **Mirror Used**: `${{ steps.final-mirror-info.outputs.final_used_mirror }}`
 
           ### 📦 Files Included:
           - Firmware files with date tag: `${{ steps.get-date.outputs.formatted_date }}`
