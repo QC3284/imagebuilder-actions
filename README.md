@@ -1,6 +1,8 @@
 # 🔧 ImmortalWrt AutoBuilder
 
-[![Build Status](https://github.com/QC3284/imagebuilder-actions/workflows/%F0%9F%94%A7%20ImmortalWrt%20AutoBuilder/badge.svg)](https://github.com/QCC3284/imagebuilder-actions/actions)
+[![🔧 ImmortalWrt AutoBuilder](https://github.com/QC3284/imagebuilder-actions/actions/workflows/Build-immortalwrt.yml/badge.svg)](https://github.com/QC3284/imagebuilder-actions/actions/workflows/Build-immortalwrt.yml)
+[![OpenClash Update Check](https://github.com/QC3284/imagebuilder-actions/actions/workflows/Auto-update.yml/badge.svg)](https://github.com/QC3284/imagebuilder-actions/actions/workflows/Auto-update.yml)
+[![Clear All Releases](https://github.com/QC3284/imagebuilder-actions/actions/workflows/CLEAR.yml/badge.svg)](https://github.com/QC3284/imagebuilder-actions/actions/workflows/CLEAR.yml)
 
 ### 简介
 ImmortalWrt AutoBuilder 是一个自动化的固件构建系统，用于定期编译和发布 ImmortalWrt 固件。该系统通过 GitHub Actions 实现自动化构建流程，支持多种设备并提供自定义软件包功能。
