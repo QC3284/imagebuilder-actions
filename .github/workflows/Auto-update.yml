@@ -41,13 +41,19 @@ jobs:
       id: read_mirror_config
       if: steps.check_config.outputs.use_mirrors_config_exists == 'true'
       run: |
-        USE_MIRRORS=$(cat config/use_mirrors.json | grep -o '"use_mirrors"[[:space:]]*:[[:space:]]*true')
-        if [ -n "$USE_MIRRORS" ]; then
+        # 读取JSON文件并解析use_mirrors字段
+        USE_MIRRORS_VALUE=$(cat config/use_mirrors.json | grep -o '"use_mirrors"[[:space:]]*:[[:space:]]*[a-zA-Z]*' | cut -d':' -f2 | tr -d ' ')
+
+        if [ "$USE_MIRRORS_VALUE" = "true" ]; then
           echo "use_mirrors=true" >> $GITHUB_OUTPUT
           echo "Mirror usage enabled based on config"
-        else
+        elif [ "$USE_MIRRORS_VALUE" = "false" ]; then
           echo "use_mirrors=false" >> $GITHUB_OUTPUT
           echo "Mirror usage disabled based on config"
+        else
+          # 默认行为：如果值不是true或false，或者格式有问题，默认禁用镜像
+          echo "use_mirrors=false" >> $GITHUB_OUTPUT
+          echo "Invalid format or missing value, defaulting to mirror usage disabled"
         fi
 
     - name: Check if openclash.ipk exists
