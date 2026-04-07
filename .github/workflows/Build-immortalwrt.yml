@@ -740,7 +740,7 @@ jobs:
         echo "::endgroup::"
 
     - name: 🚀 Upload Release
-      uses: softprops/action-gh-release@main
+      uses: softprops/action-gh-release@master
       with:
         files: ${{ env.ARTIFACT_DIR }}/*
         tag_name: build-${{ github.run_id }}-${{ matrix.device }}
