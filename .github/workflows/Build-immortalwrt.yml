@@ -21,7 +21,7 @@ jobs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
     - name: 🛬 Checkout Repository
-      uses: actions/checkout@main
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
     - name: 🔍 Validate Config Files
       run: |
@@ -93,7 +93,7 @@ jobs:
 
     steps:
     - name: 🛬 Checkout Repository
-      uses: actions/checkout@main
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
     - name: 📅 Get Build Date (CST)
       id: get-date
@@ -761,7 +761,7 @@ jobs:
         echo "::endgroup::"
 
     - name: 🚀 Upload Release
-      uses: softprops/action-gh-release@master
+      uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
       with:
         files: ${{ env.ARTIFACT_DIR }}/*
         tag_name: build-${{ github.run_id }}-${{ matrix.device }}
