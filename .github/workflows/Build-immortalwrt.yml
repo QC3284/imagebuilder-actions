@@ -14,7 +14,9 @@ on:
 jobs:
   config:
     name: ⚙️ Load Configuration
-    runs-on: ubuntu-latest
+    # 固定 24.04：2026-10-25 起 ubuntu-latest 指向 26.04，其默认 coreutils 换成
+    # uutils（install --version 不含 "GNU"），会让 ImageBuilder 前置检查失败
+    runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
@@ -82,7 +84,9 @@ jobs:
   build-firmware:
     name: 🔨 Build ${{ matrix.device }}
     needs: config
-    runs-on: ubuntu-latest
+    # 固定 24.04：ubuntu-latest 已切到 26.04（uutils coreutils），
+    # ImageBuilder 24.10 的 prereq 检查要求 GNU 'install'，见下方环境自检步骤
+    runs-on: ubuntu-24.04
     strategy:
       matrix: ${{ fromJson(needs.config.outputs.matrix) }}
       fail-fast: false
@@ -111,6 +115,23 @@ jobs:
         sudo apt-get update -y
         sudo apt-get install -y build-essential libncurses5-dev zlib1g-dev gawk git gettext libssl-dev xsltproc wget unzip python3 jq zstd axel coreutils openssl rhash curl dnsutils
         sudo apt-get install -y libncursesw5-dev zlib1g-dev genisoimage xsltproc rsync wget unzip dnsmasq stunnel4 net-tools resolvconf python3 python3-pip python3-venv iptables-persistent net-tools
+        echo "::endgroup::"
+
+    - name: 🧪 Verify GNU coreutils (ImageBuilder 前置检查)
+      run: |
+        echo "::group::Checking host coreutils"
+        # OpenWrt ImageBuilder 的 include/prereq-build.mk 要求 install --version 输出含 "GNU"，
+        # 否则构建会在 "Checking 'install'... failed." 处中断。
+        # Ubuntu 26.04 起默认 coreutils 换成 uutils（输出 "install (uutils coreutils) x.y.z"），会踩这个坑。
+        INSTALL_VERSION=$(install --version 2>/dev/null | head -n 1 || true)
+        echo "install: ${INSTALL_VERSION:-<not found>}"
+        if ! install --version 2>/dev/null | grep -q GNU; then
+          echo "::error::当前运行器的 install 不是 GNU coreutils（${INSTALL_VERSION:-未找到 install}）"
+          echo "::error::ImageBuilder 的 prereq 检查会失败：Please install GNU 'install'"
+          echo "::error::修复方式：保持 runs-on 为 ubuntu-24.04，或改装 GNU coreutils 后重新运行"
+          exit 1
+        fi
+        echo "✅ GNU coreutils 可用"
         echo "::endgroup::"
 
     - name: 🗺️ Read Device Target Mapping from Config
