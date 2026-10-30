@@ -25,9 +25,10 @@ ImmortalWrt AutoBuilder 是一个自动化的固件构建系统，用于定期�
 │   ├── version.json          # 版本信息配置  
 │   ├── device_targets.json   # 设备目标映射
 │   └── packages_*.txt        # 设备专用软件包列表
+├── gxjc/                     # OpenClash IPK（由 Auto-update 维护，构建流程未读取）
 ├── zdy_pkg/                  # 自定义软件包目录
 ├── zdy_fk_pkg/               # 分控自定义软件包目录
-└── zdy_rjb.txt               # 主自定义包设备列表
+├── zdy_rjb.txt               # 主自定义包设备列表
 └── zdy_rjb_fk.txt            # 分控自定义包设备列表
 ```
 
@@ -50,14 +51,13 @@ https://mirrors.xxx.net/immortalwrt
 ```
 
 #### `config/devices.json`
+设备名数组，数组里每个设备都会建一个独立的构建 job：
 ```json
-{
-  "devices": [
-    "device1",
-    "device2",
-    "device3"
-  ]
-}
+[
+  "glinet_gl-mt3000",
+  "glinet_gl-mt6000",
+  "xiaomi_mi-router-cr6606"
+]
 ```
 
 #### `config/version.json`
@@ -86,4 +86,16 @@ https://mirrors.xxx.net/immortalwrt
 ### 🔄 触发方式
 - **定时触发**: 每周一和周三 UTC 时间凌晨4点（北京时间中午12点）
 - **手动触发**: 通过 GitHub Actions 手动运行
-- **推送触发**: 修改 `config/` 或 `zdy_pkg/` 目录下的文件时
+- **推送触发**: 修改 `config/`、`zdy_pkg/` 或 `zdy_fk_pkg/` 目录下的文件时
+
+### 🤖 工作流
+| 工作流 | 触发 | 作用 |
+| --- | --- | --- |
+| `Build-immortalwrt.yml` | 定时（周一 / 周三 04:00 UTC）、手动、`config/` `zdy_pkg/` `zdy_fk_pkg/` 变更 | 并行构建并发布全部设备固件 |
+| `Auto-update.yml` | 定时（每天 03:00 / 15:00 UTC）、手动 | 检查并更新 `gxjc/openclash.ipk`，有变化时触发一次构建 |
+| `CLEAR.yml` | 定时（每周日 01:00 UTC）、手动 | 删除全部 Release 与 tag，控制存储占用 |
+
+### 🖥️ 构建环境要求
+- 工作流固定 `runs-on: ubuntu-24.04`，**不要改回 `ubuntu-latest`**：2026-10-25 起 `ubuntu-latest` 指向 Ubuntu 26.04，其默认 coreutils 换成了 uutils 实现，`install --version` 不含 "GNU"，ImageBuilder 的前置检查会直接失败（曾导致全部设备构建中断）。
+- 构建流程含「🧪 Verify GNU coreutils」自检步骤，运行器上的 `install` 不是 GNU 版本时会立即报错并给出修复提示。
+- 第三方 Action 全部固定到 commit SHA，避免上游变动静默打断构建。
