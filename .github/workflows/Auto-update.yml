@@ -230,10 +230,25 @@ jobs:
         echo "Downloading from official: $PACKAGE_URL"
 
         # 下载文件
-        wget -O latest_openclash.ipk "$PACKAGE_URL"
+        # 注意：wget -O 失败时仍会创建 0 字节文件，只判断 [ -f ] 会把失败当成功，
+        # 从而把空包 mv 进仓库并提交（历史事故：提交 10aa326 / 699f3dc 的 0 字节 openclash.ipk）。
+        if ! wget -O latest_openclash.ipk "$PACKAGE_URL"; then
+          echo "::error::从官方源下载失败（wget 返回非 0），删除残留文件"
+          rm -f latest_openclash.ipk
+          exit 1
+        fi
 
-        if [ ! -f "latest_openclash.ipk" ]; then
-          echo "❌ Failed to download package from official source"
+        if [ ! -s "latest_openclash.ipk" ]; then
+          echo "::error::官方源返回了空文件（多为 5xx / 拦截页）"
+          rm -f latest_openclash.ipk
+          exit 1
+        fi
+
+        FILESIZE=$(stat -c%s latest_openclash.ipk)
+        echo "Downloaded size: $FILESIZE bytes"
+        if [ "$FILESIZE" -lt 100000 ]; then
+          echo "::error::官方源下载到的文件仅 $FILESIZE 字节，疑似错误页面，拒绝使用"
+          rm -f latest_openclash.ipk
           exit 1
         fi
 
@@ -250,11 +265,18 @@ jobs:
 
     - name: Download latest OpenClash package from mirrors
       id: download_package_mirror
-      if: steps.check_file.outputs.file_exists == 'true' && steps.download_package_official.outcome != 'success' && steps.read_mirror_config.outputs.use_mirrors == 'true'
+      if: steps.check_file.outputs.file_exists == 'true' && steps.download_package_official.outcome != 'success' && steps.read_mirror_config.outputs.use_mirrors == 'true' && steps.get_mirrors.outcome == 'success'
       run: |
         # 尝试从镜像源下载文件
         TRIED_COUNT=0
         MAX_TRIES=${{ steps.get_mirrors.outputs.total_mirrors }}
+
+        # total_mirrors 可能为空（镜像列表步骤被跳过等），空值会让 [ 0 -lt ]
+        # 报 "unary operator expected" 并让循环一次都不执行却以 0 退出。
+        if [ -z "$MAX_TRIES" ]; then
+          echo "::error::未取得镜像数量（Get mirrors list 未成功），无法从镜像下载"
+          exit 1
+        fi
 
         while [ $TRIED_COUNT -lt $MAX_TRIES ]; do
           # 随机选择一个镜像源用于下载
@@ -272,7 +294,9 @@ jobs:
 
           # 尝试下载文件
           if wget -O latest_openclash.ipk "$PACKAGE_URL"; then
-            if [ -f "latest_openclash.ipk" ]; then
+            MIRROR_SIZE=0
+            [ -s "latest_openclash.ipk" ] && MIRROR_SIZE=$(stat -c%s latest_openclash.ipk)
+            if [ "$MIRROR_SIZE" -ge 100000 ]; then
               # 计算下载文件的哈希值
               REMOTE_SHA256=$(sha256sum latest_openclash.ipk | cut -d' ' -f1)
               REMOTE_MD5=$(md5sum latest_openclash.ipk | cut -d' ' -f1)
@@ -285,10 +309,12 @@ jobs:
               echo "MD5: $REMOTE_MD5"
               break
             else
-              echo "❌ File not downloaded properly from mirror $SELECTED_MIRROR"
+              echo "❌ Mirror $SELECTED_MIRROR 返回空文件或异常小文件（$MIRROR_SIZE 字节），丢弃"
+              rm -f latest_openclash.ipk
             fi
           else
             echo "❌ Failed to download from mirror $SELECTED_MIRROR"
+            rm -f latest_openclash.ipk
           fi
 
           # 从未使用镜像列表中移除已尝试的镜像
@@ -322,11 +348,25 @@ jobs:
           echo "update_needed=false" >> $GITHUB_OUTPUT
         else
           echo "Hashes differ - update required"
+
+          # 防污染：只有校验通过的下载文件才允许覆盖仓库里的包，
+          # 且 update_needed 必须在校验之后写入，否则后续步骤会被误导。
+          if [ ! -s latest_openclash.ipk ]; then
+            echo "::error::待更新的文件不存在或为空，拒绝覆盖 gxjc/openclash.ipk"
+            exit 1
+          fi
+
+          FILESIZE=$(stat -c%s latest_openclash.ipk)
+          if [ "$FILESIZE" -lt 100000 ]; then
+            echo "::error::待更新的文件仅 $FILESIZE 字节，疑似错误页面，拒绝覆盖 gxjc/openclash.ipk"
+            exit 1
+          fi
+
           echo "update_needed=true" >> $GITHUB_OUTPUT
 
           # 替换本地文件
           mv latest_openclash.ipk gxjc/openclash.ipk
-          echo "✅ Local file updated"
+          echo "✅ Local file updated ($FILESIZE bytes)"
         fi
 
     - name: Commit and push changes
