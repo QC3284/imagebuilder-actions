@@ -289,6 +289,9 @@ jobs:
       if: steps.test-primary-url.outputs.primary_available == 'false' && steps.test-mirrors.outputs.mirrors_available == 'true'
       run: |
         echo "::group::Downloading ImageBuilder using mirror"
+        # 该目录曾经靠一个占位文件存在于仓库; 占位文件删除后新检出不再自带,
+        # axel -o 会因目录不存在报 "Error opening local file", 必须显式创建。
+        mkdir -p immortalwrt_imagebuilder
         SANITIZED_TARGET="${{ steps.target.outputs.sanitized_target }}"
         VERSION="${{ matrix.version }}"
         BASE_URL="${{ steps.test-mirrors.outputs.base_url }}"
@@ -348,6 +351,9 @@ jobs:
       if: steps.test-primary-url.outputs.primary_available == 'true'
       run: |
         echo "::group::Downloading ImageBuilder using primary source"
+        # 该目录曾经靠一个占位文件存在于仓库; 占位文件删除后新检出不再自带,
+        # axel -o 会因目录不存在报 "Error opening local file", 必须显式创建。
+        mkdir -p immortalwrt_imagebuilder
         SANITIZED_TARGET="${{ steps.target.outputs.sanitized_target }}"
         VERSION="${{ matrix.version }}"
         BASE_URL="${{ steps.test-primary-url.outputs.base_url }}"
